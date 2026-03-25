@@ -109,6 +109,13 @@ foreach ($executed as $migration) {
 
 Storage defaults to `{migrations-dir}/.migrun/migrun.json` — no extra configuration needed.
 
+> **Important:** The storage file tracks which migrations have already run. If it is committed to version control and then overwritten (e.g. reset to an earlier state or deleted), Migrun will re-run migrations that have already been applied. Add the file to `.gitignore` to prevent this:
+> ```
+> # migrun storage
+> {migrations-dir}/.migrun/*
+> ```
+> If you configure a custom storage path, gitignore that path instead.
+
 
 ### With a PSR-11 container (autowiring)
 
