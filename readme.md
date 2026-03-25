@@ -156,6 +156,10 @@ $orchestrator = (new MigrunBuilder())
 ->pdoStorage($pdo)                                // default table name (migrun_migrations)
 ->pdoStorage($pdo, table: 'schema_history')       // custom table name
 
+// mysqli connection (MySQL/MariaDB only)
+->mysqliStorage($mysqli)                          // default table name (migrun_migrations)
+->mysqliStorage($mysqli, table: 'schema_history') // custom table name
+
 // SQLite database file
 ->sqliteStorage()                                 // {migrations-dir}/.migrun/migrun.sqlite
 ->sqliteStorage(__DIR__ . '/var/history.sqlite')  // explicit path
@@ -334,7 +338,7 @@ Wire it the same way as any other command in your framework.
 
 | Role | Interface | Built-in |
 |---|---|---|
-| Track applied migrations | `TracksMigrations` | `JsonFileStorage` — JSON file on disk<br>`PdoStorage` — any PDO database<br>`SqliteStorage` — SQLite file (wraps `PdoStorage`) |
+| Track applied migrations | `TracksMigrations` | `JsonFileStorage` — JSON file on disk<br>`PdoStorage` — any PDO database<br>`SqliteStorage` — SQLite file (wraps `PdoStorage`)<br>`MysqliStorage` — MySQL/MariaDB via mysqli |
 | Discover migration files | `DiscoversMigrations` | `DirectoryFinder` — scans a directory |
 | Invoke migration callables | `InvokesCallable` | `ContainerInvoker` (PSR-11 autowired), `TrivialInvoker` (no args) |
 | Load and run a migration | `ExecutesMigrations` | `Executor` — delegates to an `InvokesCallable` |

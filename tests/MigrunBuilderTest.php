@@ -10,9 +10,11 @@ use Dakujem\Migrun\Finder\DirectoryFinder;
 use Dakujem\Migrun\MigrunBuilder;
 use Dakujem\Migrun\Orchestrator;
 use Dakujem\Migrun\Storage\JsonFileStorage;
+use Dakujem\Migrun\Storage\MysqliStorage;
 use Dakujem\Migrun\Storage\PdoStorage;
 use Dakujem\Migrun\Storage\SqliteStorage;
 use LogicException;
+use mysqli;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
@@ -80,6 +82,30 @@ final class MigrunBuilderTest extends TestCase
         $pdo = new PDO('sqlite::memory:');
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         return $pdo;
+    }
+
+    private function connectOrSkip(): mysqli
+    {
+        if (!extension_loaded('mysqli')) {
+            self::markTestSkipped('mysqli extension is not available.');
+        }
+
+        $host = (string) (getenv('MYSQL_HOST') ?: 'localhost');
+        $port = (int)    (getenv('MYSQL_PORT') ?: 3306);
+        $user = (string) (getenv('MYSQL_USER') ?: 'root');
+        $pass = (string) (getenv('MYSQL_PASS') ?: '');
+        $db   = (string) (getenv('MYSQL_DB')   ?: 'migrun_test');
+
+        try {
+            $conn = @new mysqli($host, $user, $pass, $db, $port);
+        } catch (\mysqli_sql_exception $e) {
+            self::markTestSkipped("MySQL not reachable ({$e->getMessage()}). Set MYSQL_HOST/USER/PASS/DB to run these tests.");
+        }
+        if ($conn->connect_errno) {
+            self::markTestSkipped("MySQL not reachable ({$conn->connect_error}). Set MYSQL_HOST/USER/PASS/DB to run these tests.");
+        }
+        $conn->set_charset('utf8mb4');
+        return $conn;
     }
 
     // -------------------------------------------------------------------------
@@ -304,6 +330,58 @@ final class MigrunBuilderTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Storage — mysqli
+    // -------------------------------------------------------------------------
+
+    public function testMysqliStorageIsUsedWhenMysqliIsSet(): void
+    {
+        $conn = $this->connectOrSkip();
+
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->mysqliStorage($conn)
+            ->build();
+
+        $conn->close();
+
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(MysqliStorage::class, $storage);
+    }
+
+    public function testMysqliCustomTableName(): void
+    {
+        $conn = $this->connectOrSkip();
+
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->mysqliStorage($conn, table: 'schema_history')
+            ->build();
+
+        $conn->close();
+
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(MysqliStorage::class, $storage);
+        self::assertSame('schema_history', $this->prop($storage, 'table'));
+    }
+
+    public function testMysqliResetsWhenCalledWithNull(): void
+    {
+        $conn = $this->connectOrSkip();
+
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->mysqliStorage($conn)
+            ->mysqliStorage(null) // reset
+            ->build();
+
+        $conn->close();
+
+        // Falls back to the default JSON storage.
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(JsonFileStorage::class, $storage);
+    }
+
+    // -------------------------------------------------------------------------
     // Storage — conflict detection
     // -------------------------------------------------------------------------
 
@@ -336,6 +414,45 @@ final class MigrunBuilderTest extends TestCase
         (new MigrunBuilder())
             ->directory($this->dir)
             ->pdoStorage($this->inMemoryPdo())
+            ->sqliteStorage()
+            ->build();
+    }
+
+    public function testMysqliAndFileStorageTogetherThrowsOnBuild(): void
+    {
+        $conn = $this->connectOrSkip();
+
+        $this->expectException(LogicException::class);
+
+        (new MigrunBuilder())
+            ->directory($this->dir)
+            ->mysqliStorage($conn)
+            ->fileStorage($this->dir . '/migrun.json')
+            ->build();
+    }
+
+    public function testMysqliAndPdoTogetherThrowsOnBuild(): void
+    {
+        $conn = $this->connectOrSkip();
+
+        $this->expectException(LogicException::class);
+
+        (new MigrunBuilder())
+            ->directory($this->dir)
+            ->mysqliStorage($conn)
+            ->pdoStorage($this->inMemoryPdo())
+            ->build();
+    }
+
+    public function testMysqliAndSqliteTogetherThrowsOnBuild(): void
+    {
+        $conn = $this->connectOrSkip();
+
+        $this->expectException(LogicException::class);
+
+        (new MigrunBuilder())
+            ->directory($this->dir)
+            ->mysqliStorage($conn)
             ->sqliteStorage()
             ->build();
     }
@@ -400,6 +517,7 @@ final class MigrunBuilderTest extends TestCase
         self::assertSame($builder, $builder->fileStorage(null));
         self::assertSame($builder, $builder->sqliteStorage(null));
         self::assertSame($builder, $builder->pdoStorage(null));
+        self::assertSame($builder, $builder->mysqliStorage(null));
     }
 
     // -------------------------------------------------------------------------

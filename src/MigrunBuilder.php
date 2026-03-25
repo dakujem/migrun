@@ -9,9 +9,11 @@ use Dakujem\Migrun\Executor\Executor;
 use Dakujem\Migrun\Executor\TrivialInvoker;
 use Dakujem\Migrun\Finder\DirectoryFinder;
 use Dakujem\Migrun\Storage\JsonFileStorage;
+use Dakujem\Migrun\Storage\MysqliStorage;
 use Dakujem\Migrun\Storage\PdoStorage;
 use Dakujem\Migrun\Storage\SqliteStorage;
 use LogicException;
+use mysqli;
 use PDO;
 use Psr\Container\ContainerInterface;
 
@@ -41,6 +43,8 @@ use Psr\Container\ContainerInterface;
  *   ->sqliteStorage('/path/to/history.sqlite') SQLite at an explicit path
  *   ->pdoStorage($pdo)                       any PDO connection, default table name
  *   ->pdoStorage($pdo, table: 'schema_history') any PDO connection, custom table name
+ *   ->mysqliStorage($mysqli)                 MySQL/MariaDB via mysqli, default table name
+ *   ->mysqliStorage($mysqli, table: 'schema_history') mysqli with custom table name
  *
  * The class is not final and may be extended to add project-specific defaults
  * or additional fluent setters.
@@ -55,6 +59,8 @@ class MigrunBuilder
     protected ?string $storagePath = null;
     protected ?PDO $pdo = null;
     protected string $pdoTable = 'migrun_migrations';
+    protected ?mysqli $mysqli = null;
+    protected string $mysqliTable = 'migrun_migrations';
     /**
      * null  = not set (slot is clear)
      * false = use default path ({migrations-dir}/.migrun/migrun.sqlite)
@@ -126,13 +132,28 @@ class MigrunBuilder
      *
      * Pass null to clear this slot.
      *
-     * Mutually exclusive with fileStorage() and sqliteStorage() — build() throws if
+     * Mutually exclusive with fileStorage(), sqliteStorage(), and mysqliStorage() — build() throws if
      * more than one storage method is configured at once.
      */
     public function pdoStorage(?PDO $pdo, string $table = 'migrun_migrations'): static
     {
         $this->pdo = $pdo;
         $this->pdoTable = $table;
+        return $this;
+    }
+
+    /**
+     * Use a mysqli connection as the migration history storage (MySQL/MariaDB).
+     *
+     * Pass null to clear this slot.
+     *
+     * Mutually exclusive with fileStorage(), sqliteStorage(), and pdoStorage() — build() throws if
+     * more than one storage method is configured at once.
+     */
+    public function mysqliStorage(?mysqli $mysqli, string $table = 'migrun_migrations'): static
+    {
+        $this->mysqli = $mysqli;
+        $this->mysqliTable = $table;
         return $this;
     }
 
@@ -166,6 +187,7 @@ class MigrunBuilder
             'fileStorage'   => $this->storagePath !== null,
             'sqliteStorage' => $this->sqlitePath !== null,
             'pdoStorage'    => $this->pdo !== null,
+            'mysqliStorage' => $this->mysqli !== null,
         ]);
 
         if (count($active) > 1) {
@@ -173,6 +195,10 @@ class MigrunBuilder
                 'Only one storage backend may be configured at a time. ' .
                 'The following are set simultaneously: ' . implode(', ', array_keys($active)) . '().',
             );
+        }
+
+        if ($this->mysqli !== null) {
+            return new MysqliStorage($this->mysqli, $this->mysqliTable);
         }
 
         if ($this->pdo !== null) {
