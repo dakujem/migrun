@@ -103,7 +103,7 @@ $orchestrator = (new MigrunBuilder())
 
 $executed = $orchestrator->run();
 foreach ($executed as $migration) {
-    echo "Ran: {$migration->id()}" . PHP_EOL;
+    echo "Migrated: {$migration->id()}" . PHP_EOL;
 }
 ```
 
@@ -176,7 +176,7 @@ $orchestrator = new Orchestrator(
 
 $executed = $orchestrator->run();
 foreach ($executed as $migration) {
-    echo "Ran: {$migration->id()}" . PHP_EOL;
+    echo "Migrated: {$migration->id()}" . PHP_EOL;
 }
 
 // Roll back the last migration
@@ -218,7 +218,7 @@ match ($command) {
             return;
         }
         foreach ($executed as $m) {
-            echo "Ran:      {$m->id()}" . PHP_EOL;
+            echo "Migrated: {$m->id()}" . PHP_EOL;
         }
     })(),
 
@@ -338,12 +338,12 @@ final class PdoStorage implements TracksMigrations
     public function getApplied(): iterable
     {
         $rows = $this->db
-            ->query('SELECT id, ran_at FROM migrations ORDER BY ran_at DESC')
+            ->query('SELECT `id`, `at` FROM `migrations` ORDER BY `at` DESC')
             ->fetchAll(\PDO::FETCH_ASSOC);
         return array_map(
             fn($row) => new MigrationHistoryEntry(
                 id: $row['id'],
-                ranAt: new \DateTimeImmutable($row['ran_at']),
+                at: new \DateTimeImmutable($row['at']),
             ),
             $rows,
         );
@@ -351,20 +351,20 @@ final class PdoStorage implements TracksMigrations
 
     public function isApplied(MigrationFile $migration): bool
     {
-        $stmt = $this->db->prepare('SELECT 1 FROM migrations WHERE id = ?');
+        $stmt = $this->db->prepare('SELECT 1 FROM `migrations` WHERE id = ?');
         $stmt->execute([$migration->id()]);
         return (bool) $stmt->fetchColumn();
     }
 
     public function markApplied(MigrationFile $migration, ?\DateTimeImmutable $at = null): void
     {
-        $stmt = $this->db->prepare('INSERT INTO migrations (id, ran_at) VALUES (?, ?)');
+        $stmt = $this->db->prepare('INSERT INTO `migrations` (`id`, `at`) VALUES (?, ?)');
         $stmt->execute([$migration->id(), ($at ?? new \DateTimeImmutable())->format('Y-m-d H:i:s')]);
     }
 
     public function markReverted(MigrationFile $migration, ?\DateTimeImmutable $at = null): void
     {
-        $stmt = $this->db->prepare('DELETE FROM migrations WHERE id = ?');
+        $stmt = $this->db->prepare('DELETE FROM `migrations` WHERE `id` = ?');
         $stmt->execute([$migration->id()]);
     }
 }

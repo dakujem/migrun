@@ -64,7 +64,7 @@ final class FileStorageTest extends TestCase
         self::assertCount(1, $applied);
         self::assertInstanceOf(MigrationHistoryEntry::class, $applied[0]);
         self::assertSame('20240101_120000_create_users', $applied[0]->id());
-        self::assertEquals($at, $applied[0]->ranAt());
+        self::assertEquals($at, $applied[0]->at());
     }
 
     public function testMarkAppliedDoesNotDuplicate(): void
@@ -148,15 +148,15 @@ final class FileStorageTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // Legacy file formats — backward compatibility
+    // File format
     // -------------------------------------------------------------------------
 
-    public function testReadsNewFormatWithRanAt(): void
+    public function testReadsCurrentFormat(): void
     {
         file_put_contents(
             $this->storagePath,
             json_encode([
-                ['id' => '20240101_120000_create_users', 'ran_at' => '2024-01-01T12:00:00+00:00'],
+                ['id' => '20240101_120000_create_users', 'at' => '2024-01-01T12:00:00+00:00'],
             ], JSON_PRETTY_PRINT) . "\n",
         );
 
@@ -167,47 +167,7 @@ final class FileStorageTest extends TestCase
         self::assertSame('20240101_120000_create_users', $applied[0]->id());
         self::assertEquals(
             new DateTimeImmutable('2024-01-01T12:00:00+00:00'),
-            $applied[0]->ranAt(),
+            $applied[0]->at(),
         );
-    }
-
-    public function testReadsLegacyFormatWithTimestamp(): void
-    {
-        // Old format used "timestamp" in Ymd_His format
-        file_put_contents(
-            $this->storagePath,
-            json_encode([
-                ['id' => '20240101_120000_create_users', 'timestamp' => '20240101_120000'],
-                ['id' => '20240115_090000_add_index', 'timestamp' => '20240115_090000'],
-            ], JSON_PRETTY_PRINT) . "\n",
-        );
-
-        $storage = new JsonFileStorage($this->storagePath);
-        $applied = iterator_to_array($storage->getApplied());
-
-        self::assertCount(2, $applied);
-        // most-recent-first
-        self::assertSame('20240115_090000_add_index', $applied[0]->id());
-        self::assertSame('20240101_120000_create_users', $applied[1]->id());
-    }
-
-    public function testReadsLegacyPlainStringIds(): void
-    {
-        // Oldest format: plain array of string IDs
-        file_put_contents(
-            $this->storagePath,
-            json_encode([
-                '20240101_120000_create_users',
-                '20240115_090000_add_index',
-            ], JSON_PRETTY_PRINT) . "\n",
-        );
-
-        $storage = new JsonFileStorage($this->storagePath);
-        $applied = iterator_to_array($storage->getApplied());
-
-        self::assertCount(2, $applied);
-        // most-recent-first (storage order reversed)
-        self::assertSame('20240115_090000_add_index', $applied[0]->id());
-        self::assertSame('20240101_120000_create_users', $applied[1]->id());
     }
 }

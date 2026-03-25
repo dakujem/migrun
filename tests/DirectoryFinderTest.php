@@ -199,7 +199,7 @@ final class DirectoryFinderTest extends TestCase
 
         $entry = new MigrationHistoryEntry(
             id: '20240101_120000_alpha',
-            ranAt: new DateTimeImmutable('2024-01-01 12:00:00'),
+            at: new DateTimeImmutable('2024-01-01 12:00:00'),
         );
 
         $finder = new DirectoryFinder($this->dir);

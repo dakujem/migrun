@@ -43,7 +43,7 @@ final class SpyStorage implements TracksMigrations
     public function getApplied(): iterable
     {
         return array_map(
-            fn(string $id) => new MigrationHistoryEntry(id: $id, ranAt: new \DateTimeImmutable()),
+            fn(string $id) => new MigrationHistoryEntry(id: $id, at: new \DateTimeImmutable()),
             array_reverse($this->applied),
         );
     }

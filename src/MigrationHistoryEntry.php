@@ -19,7 +19,7 @@ final readonly class MigrationHistoryEntry
 {
     public function __construct(
         private string $id,
-        private DateTimeImmutable $ranAt,
+        private DateTimeImmutable $at,
     ) {
     }
 
@@ -30,8 +30,8 @@ final readonly class MigrationHistoryEntry
     }
 
     /** The timestamp of when the migration was run. */
-    public function ranAt(): DateTimeImmutable
+    public function at(): DateTimeImmutable
     {
-        return $this->ranAt;
+        return $this->at;
     }
 }
