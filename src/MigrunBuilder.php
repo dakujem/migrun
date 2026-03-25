@@ -9,7 +9,10 @@ use Dakujem\Migrun\Executor\Executor;
 use Dakujem\Migrun\Executor\TrivialInvoker;
 use Dakujem\Migrun\Finder\DirectoryFinder;
 use Dakujem\Migrun\Storage\JsonFileStorage;
+use Dakujem\Migrun\Storage\PdoStorage;
+use Dakujem\Migrun\Storage\SqliteStorage;
 use LogicException;
+use PDO;
 use Psr\Container\ContainerInterface;
 
 /**
@@ -32,6 +35,14 @@ use Psr\Container\ContainerInterface;
  *       ->container($container)
  *       ->build();
  *
+ * Storage backends (mutually exclusive — build() throws if more than one is set):
+ *
+ *   ->fileStorage('/path/to/migrun.json')   JSON file (default when nothing is set)
+ *   ->sqliteStorage()                        SQLite at {migrations-dir}/.migrun/migrun.sqlite
+ *   ->sqliteStorage('/path/to/history.sqlite') SQLite at an explicit path
+ *   ->pdoStorage($pdo)                       any PDO connection, default table name
+ *   ->pdoStorage($pdo, table: 'schema_history') any PDO connection, custom table name
+ *
  * The class is not final and may be extended to add project-specific defaults
  * or additional fluent setters.
  */
@@ -39,8 +50,19 @@ class MigrunBuilder
 {
     protected ?string $directory = null;
     protected ?ContainerInterface $container = null;
-    protected ?string $storage = null;
     protected bool $recursive = true;
+
+    // Storage slots — at most one may be non-null when build() is called.
+    protected ?string $storagePath = null;
+    protected ?PDO $pdo = null;
+    protected string $pdoTable = 'migrun_migrations';
+    /**
+     * null  = not set (slot is clear)
+     * false = use default path ({migrations-dir}/.migrun/migrun.sqlite)
+     * string = explicit path
+     */
+    protected string|false|null $sqlitePath = null;
+    protected string $sqliteTable = 'migrun_migrations';
 
     /**
      * Path to the directory that holds migration files.
@@ -65,17 +87,50 @@ class MigrunBuilder
     }
 
     /**
-     * Path to the storage file or directory.
+     * Use a JSON file as the migration history storage.
      *
      * - File path  → used as-is.
      * - Directory path → migrun.json is appended as the filename.
-     * - Not set (null) → defaults to {migrations-dir}/.migrun/migrun.json.
+     * - null (default) → {migrations-dir}/.migrun/migrun.json.
      *
-     * Pass null to revert to the default location.
+     * Mutually exclusive with pdoStorage() and sqliteStorage() — build() throws if more
+     * than one storage method is configured at once.
      */
-    public function storage(?string $path): static
+    public function fileStorage(?string $path): static
     {
-        $this->storage = $path;
+        $this->storagePath = $path;
+        return $this;
+    }
+
+    /**
+     * Use an SQLite database file as the migration history storage.
+     *
+     * - No path argument → {migrations-dir}/.migrun/migrun.sqlite.
+     * - Explicit path → used as-is (parent directory is created if needed).
+     * - Pass null to clear this slot.
+     *
+     * Mutually exclusive with fileStorage() and pdoStorage() — build() throws if
+     * more than one storage method is configured at once.
+     */
+    public function sqliteStorage(string|false|null $path = false, string $table = 'migrun_migrations'): static
+    {
+        $this->sqlitePath = $path;
+        $this->sqliteTable = $table;
+        return $this;
+    }
+
+    /**
+     * Use a PDO connection as the migration history storage.
+     *
+     * Pass null to clear this slot.
+     *
+     * Mutually exclusive with fileStorage() and sqliteStorage() — build() throws if
+     * more than one storage method is configured at once.
+     */
+    public function pdoStorage(?PDO $pdo, string $table = 'migrun_migrations'): static
+    {
+        $this->pdo = $pdo;
+        $this->pdoTable = $table;
         return $this;
     }
 
@@ -92,7 +147,8 @@ class MigrunBuilder
     /**
      * Build and return a fully wired Orchestrator.
      *
-     * @throws LogicException if no migrations directory has been set.
+     * @throws LogicException if no migrations directory has been set, or if
+     *                        more than one storage backend is configured.
      */
     public function build(): Orchestrator
     {
@@ -100,7 +156,7 @@ class MigrunBuilder
             throw new LogicException('A migrations directory must be set via directory() before calling build().');
         }
 
-        $storage = new JsonFileStorage($this->resolveStoragePath());
+        $storage = $this->buildStorage();
         $finder = new DirectoryFinder($this->directory, $this->recursive);
         $invoker = $this->container !== null
             ? new ContainerInvoker($this->container)
@@ -112,21 +168,50 @@ class MigrunBuilder
 
     // -------------------------------------------------------------------------
 
+    protected function buildStorage(): TracksMigrations
+    {
+        $active = array_filter([
+            'fileStorage'   => $this->storagePath !== null,
+            'sqliteStorage' => $this->sqlitePath !== null,
+            'pdoStorage'    => $this->pdo !== null,
+        ]);
+
+        if (count($active) > 1) {
+            throw new LogicException(
+                'Only one storage backend may be configured at a time. ' .
+                'The following are set simultaneously: ' . implode(', ', array_keys($active)) . '().',
+            );
+        }
+
+        if ($this->pdo !== null) {
+            return new PdoStorage($this->pdo, $this->pdoTable);
+        }
+
+        if ($this->sqlitePath !== null) {
+            $path = $this->sqlitePath === false
+                ? $this->directory . '/.migrun/migrun.sqlite'
+                : $this->sqlitePath;
+            return new SqliteStorage($path, $this->sqliteTable);
+        }
+
+        // JSON file — default backend.
+        return new JsonFileStorage($this->resolveStoragePath());
+    }
+
     protected function resolveStoragePath(): string
     {
-        if ($this->storage === null) {
-            // Default: a .migrun sub-directory inside the migrations directory.
+        if ($this->storagePath === null) {
             return $this->directory . '/.migrun/migrun.json';
         }
 
         if (
-            is_dir($this->storage) ||
-            pathinfo($this->storage, PATHINFO_EXTENSION) === '' ||
-            pathinfo($this->storage, PATHINFO_FILENAME) === ''
+            is_dir($this->storagePath) ||
+            pathinfo($this->storagePath, PATHINFO_EXTENSION) === '' ||
+            pathinfo($this->storagePath, PATHINFO_FILENAME) === ''
         ) {
-            return rtrim($this->storage, '/\\') . '/migrun.json';
+            return rtrim($this->storagePath, '/\\') . '/migrun.json';
         }
 
-        return $this->storage;
+        return $this->storagePath;
     }
 }

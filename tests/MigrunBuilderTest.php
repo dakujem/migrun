@@ -10,7 +10,10 @@ use Dakujem\Migrun\Finder\DirectoryFinder;
 use Dakujem\Migrun\MigrunBuilder;
 use Dakujem\Migrun\Orchestrator;
 use Dakujem\Migrun\Storage\JsonFileStorage;
+use Dakujem\Migrun\Storage\PdoStorage;
+use Dakujem\Migrun\Storage\SqliteStorage;
 use LogicException;
+use PDO;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use ReflectionObject;
@@ -72,6 +75,13 @@ final class MigrunBuilderTest extends TestCase
         };
     }
 
+    private function inMemoryPdo(): PDO
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        return $pdo;
+    }
+
     // -------------------------------------------------------------------------
     // build() — missing directory
     // -------------------------------------------------------------------------
@@ -104,7 +114,6 @@ final class MigrunBuilderTest extends TestCase
         $builder = (new MigrunBuilder())->directory($this->dir);
         $orchestrator = $builder->build();
 
-        // Reach into Orchestrator → Executor → invoker
         $executor = $this->prop($orchestrator, 'executor');
         $invoker = $this->prop($executor, 'invoker');
 
@@ -140,7 +149,7 @@ final class MigrunBuilderTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // Storage path resolution
+    // Storage — JSON (fileStorage)
     // -------------------------------------------------------------------------
 
     public function testDefaultStoragePathIsInsideMigrationsDir(): void
@@ -165,13 +174,12 @@ final class MigrunBuilderTest extends TestCase
 
         $orchestrator = (new MigrunBuilder())
             ->directory($this->dir)
-            ->storage($file)
+            ->fileStorage($file)
             ->build();
 
         $storage = $this->prop($orchestrator, 'storage');
-        $storagePath = $this->prop($storage, 'filePath');
-
-        self::assertSame($file, $storagePath);
+        self::assertInstanceOf(JsonFileStorage::class, $storage);
+        self::assertSame($file, $this->prop($storage, 'filePath'));
     }
 
     public function testNonExistentDirectoryStoragePathGetsMigrunJsonAppended(): void
@@ -180,13 +188,11 @@ final class MigrunBuilderTest extends TestCase
 
         $orchestrator = (new MigrunBuilder())
             ->directory($this->dir)
-            ->storage($storageDir)
+            ->fileStorage($storageDir)
             ->build();
 
         $storage = $this->prop($orchestrator, 'storage');
-        $storagePath = $this->prop($storage, 'filePath');
-
-        self::assertSame($storageDir . '/migrun.json', $storagePath);
+        self::assertSame($storageDir . '/migrun.json', $this->prop($storage, 'filePath'));
     }
 
     public function testExistingDirectoryStoragePathGetsMigrunJsonAppended(): void
@@ -196,27 +202,142 @@ final class MigrunBuilderTest extends TestCase
 
         $orchestrator = (new MigrunBuilder())
             ->directory($this->dir)
-            ->storage($storageDir)
+            ->fileStorage($storageDir)
             ->build();
 
         $storage = $this->prop($orchestrator, 'storage');
-        $storagePath = $this->prop($storage, 'filePath');
-
-        self::assertSame($storageDir . '/migrun.json', $storagePath);
+        self::assertSame($storageDir . '/migrun.json', $this->prop($storage, 'filePath'));
     }
 
-    public function testResettingStorageToNullRestoresDefault(): void
+    public function testResettingStoragePathToNullRestoresDefault(): void
     {
         $orchestrator = (new MigrunBuilder())
             ->directory($this->dir)
-            ->storage($this->dir . '/custom.json')
-            ->storage(null) // reset
+            ->fileStorage($this->dir . '/custom.json')
+            ->fileStorage(null) // reset
             ->build();
 
         $storage = $this->prop($orchestrator, 'storage');
-        $storagePath = $this->prop($storage, 'filePath');
+        self::assertInstanceOf(JsonFileStorage::class, $storage);
+        self::assertSame($this->dir . '/.migrun/migrun.json', $this->prop($storage, 'filePath'));
+    }
 
-        self::assertSame($this->dir . '/.migrun/migrun.json', $storagePath);
+    // -------------------------------------------------------------------------
+    // Storage — SQLite
+    // -------------------------------------------------------------------------
+
+    public function testSqliteDefaultPathIsInsideMigrationsDir(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->sqliteStorage()
+            ->build();
+
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(SqliteStorage::class, $storage);
+    }
+
+    public function testSqliteExplicitPath(): void
+    {
+        $path = $this->dir . '/history.sqlite';
+
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->sqliteStorage($path)
+            ->build();
+
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(SqliteStorage::class, $storage);
+    }
+
+    public function testSqliteResetsWhenCalledWithNull(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->sqliteStorage()
+            ->sqliteStorage(null) // reset
+            ->build();
+
+        // Falls back to the default JSON storage.
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(JsonFileStorage::class, $storage);
+    }
+
+    // -------------------------------------------------------------------------
+    // Storage — PDO
+    // -------------------------------------------------------------------------
+
+    public function testPdoStorageIsUsedWhenPdoIsSet(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->pdoStorage($this->inMemoryPdo())
+            ->build();
+
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(PdoStorage::class, $storage);
+    }
+
+    public function testPdoCustomTableName(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->pdoStorage($this->inMemoryPdo(), table: 'schema_history')
+            ->build();
+
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(PdoStorage::class, $storage);
+        self::assertSame('schema_history', $this->prop($storage, 'table'));
+    }
+
+    public function testPdoResetsWhenCalledWithNull(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->pdoStorage($this->inMemoryPdo())
+            ->pdoStorage(null) // reset
+            ->build();
+
+        // Falls back to the default JSON storage.
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(JsonFileStorage::class, $storage);
+    }
+
+    // -------------------------------------------------------------------------
+    // Storage — conflict detection
+    // -------------------------------------------------------------------------
+
+    public function testStoragePathAndPdoTogetherThrowsOnBuild(): void
+    {
+        $this->expectException(LogicException::class);
+
+        (new MigrunBuilder())
+            ->directory($this->dir)
+            ->fileStorage($this->dir . '/migrun.json')
+            ->pdoStorage($this->inMemoryPdo())
+            ->build();
+    }
+
+    public function testStoragePathAndSqliteTogetherThrowsOnBuild(): void
+    {
+        $this->expectException(LogicException::class);
+
+        (new MigrunBuilder())
+            ->directory($this->dir)
+            ->fileStorage($this->dir . '/migrun.json')
+            ->sqliteStorage()
+            ->build();
+    }
+
+    public function testPdoAndSqliteTogetherThrowsOnBuild(): void
+    {
+        $this->expectException(LogicException::class);
+
+        (new MigrunBuilder())
+            ->directory($this->dir)
+            ->pdoStorage($this->inMemoryPdo())
+            ->sqliteStorage()
+            ->build();
     }
 
     // -------------------------------------------------------------------------
@@ -277,7 +398,9 @@ final class MigrunBuilderTest extends TestCase
 
         self::assertSame($builder, $builder->directory($this->dir));
         self::assertSame($builder, $builder->container(null));
-        self::assertSame($builder, $builder->storage(null));
+        self::assertSame($builder, $builder->fileStorage(null));
+        self::assertSame($builder, $builder->sqliteStorage(null));
+        self::assertSame($builder, $builder->pdoStorage(null));
         self::assertSame($builder, $builder->recursive(false));
     }
 
@@ -343,7 +466,6 @@ final class MigrunBuilderTest extends TestCase
             }
         };
 
-        // The directory() setter on the parent must return static (the subclass instance)
         $result = $subclass->recursive(false);
         self::assertInstanceOf($subclass::class, $result);
     }

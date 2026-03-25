@@ -114,7 +114,7 @@ Storage defaults to `{migrations-dir}/.migrun/migrun.json` — no extra configur
 > # migrun storage
 > {migrations-dir}/.migrun/*
 > ```
-> If you configure a custom storage path, gitignore that path instead.
+> This covers both the default JSON file and the default SQLite file, since both live under `.migrun/`. If you configure a custom storage path, gitignore that path instead.
 
 
 ### With a PSR-11 container (autowiring)
@@ -137,13 +137,28 @@ $orchestrator = (new MigrunBuilder())
 use Dakujem\Migrun\MigrunBuilder;
 
 $orchestrator = (new MigrunBuilder())
-    ->directory(__DIR__ . '/migrations')   // required
-    ->container($container)                // PSR-11 container; omit for no-autowiring mode
-    ->storage(__DIR__ . '/var/migrun')     // directory → var/migrun/migrun.json;
-                                           // file path → used as-is;
-                                           // omit → {migrations-dir}/.migrun/migrun.json
-    ->recursive(false)                     // scan subdirectories (default: true)
+    ->directory(__DIR__ . '/migrations')       // required
+    ->container($container)                    // PSR-11 container; omit for no-autowiring mode
+    ->recursive(false)                         // scan subdirectories (default: true)
     ->build();
+```
+
+**Storage backend** (mutually exclusive — `build()` throws if more than one is set):
+
+```php
+// JSON file — default when nothing is set
+->fileStorage(__DIR__ . '/var/migrun')     // directory → appends /migrun.json
+                                           // file path → used as-is
+                                           // omit → {migrations-dir}/.migrun/migrun.json
+
+// SQLite database file
+->sqliteStorage()                                 // {migrations-dir}/.migrun/migrun.sqlite
+->sqliteStorage(__DIR__ . '/var/history.sqlite')  // explicit path
+->sqliteStorage(table: 'schema_history')          // default path, custom table name
+
+// Any PDO connection (MySQL, PostgreSQL, SQLite, …)
+->pdoStorage($pdo)                                // default table name (migrun_migrations)
+->pdoStorage($pdo, table: 'schema_history')       // custom table name
 ```
 
 
@@ -313,7 +328,7 @@ Wire it the same way as any other command in your framework.
 
 | Role | Interface | Built-in |
 |---|---|---|
-| Track applied migrations | `TracksMigrations` | `JsonFileStorage` — JSON file on disk |
+| Track applied migrations | `TracksMigrations` | `JsonFileStorage` — JSON file on disk<br>`PdoStorage` — any PDO database<br>`SqliteStorage` — SQLite file (wraps `PdoStorage`) |
 | Discover migration files | `DiscoversMigrations` | `DirectoryFinder` — scans a directory |
 | Invoke migration callables | `InvokesCallable` | `ContainerInvoker` (PSR-11 autowired), `TrivialInvoker` (no args) |
 | Load and run a migration | `ExecutesMigrations` | `Executor` — delegates to an `InvokesCallable` |
@@ -324,48 +339,63 @@ Every part is replaceable. Wire the built-ins for quick setup; swap them out as 
 
 ### Custom storage
 
-Implement `TracksMigrations` to track migrations in a database, Redis, S3, or anything else:
+For the common case of a SQL database, use the built-in `PdoStorage` (or `SqliteStorage`):
+
+```php
+use Dakujem\Migrun\Storage\PdoStorage;
+use Dakujem\Migrun\Storage\SqliteStorage;
+
+// Any PDO connection — table is created automatically
+$storage = new PdoStorage($pdo);
+$storage = new PdoStorage($pdo, 'schema_history'); // custom table name
+
+// SQLite convenience wrapper
+$storage = new SqliteStorage(__DIR__ . '/var/migrun.sqlite');
+```
+
+Wire it via the builder:
+
+```php
+(new MigrunBuilder())
+    ->directory(__DIR__ . '/migrations')
+    ->pdoStorage($pdo)                        // or ->sqliteStorage()
+    ->build();
+```
+
+For anything else — Redis, S3, a remote API — implement `TracksMigrations` directly:
 
 ```php
 use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\TracksMigrations;
 
-final class PdoStorage implements TracksMigrations
+final class RedisStorage implements TracksMigrations
 {
-    public function __construct(private \PDO $db) {}
+    public function __construct(private \Redis $redis, private string $key = 'migrations') {}
 
     public function getApplied(): iterable
     {
-        $rows = $this->db
-            ->query('SELECT `id`, `at` FROM `migrations` ORDER BY `at` DESC')
-            ->fetchAll(\PDO::FETCH_ASSOC);
-        return array_map(
-            fn($row) => new MigrationHistoryEntry(
-                id: $row['id'],
-                at: new \DateTimeImmutable($row['at']),
-            ),
-            $rows,
-        );
+        $entries = [];
+        foreach ($this->redis->hGetAll($this->key) as $id => $at) {
+            $entries[] = new MigrationHistoryEntry($id, new \DateTimeImmutable($at));
+        }
+        usort($entries, fn($a, $b) => $b->at() <=> $a->at());
+        return $entries;
     }
 
     public function isApplied(MigrationFile $migration): bool
     {
-        $stmt = $this->db->prepare('SELECT 1 FROM `migrations` WHERE id = ?');
-        $stmt->execute([$migration->id()]);
-        return (bool) $stmt->fetchColumn();
+        return (bool) $this->redis->hExists($this->key, $migration->id());
     }
 
     public function markApplied(MigrationFile $migration, ?\DateTimeImmutable $at = null): void
     {
-        $stmt = $this->db->prepare('INSERT INTO `migrations` (`id`, `at`) VALUES (?, ?)');
-        $stmt->execute([$migration->id(), ($at ?? new \DateTimeImmutable())->format('Y-m-d H:i:s')]);
+        $this->redis->hSet($this->key, $migration->id(), ($at ?? new \DateTimeImmutable())->format(\DateTimeImmutable::ATOM));
     }
 
     public function markReverted(MigrationFile $migration, ?\DateTimeImmutable $at = null): void
     {
-        $stmt = $this->db->prepare('DELETE FROM `migrations` WHERE `id` = ?');
-        $stmt->execute([$migration->id()]);
+        $this->redis->hDel($this->key, $migration->id());
     }
 }
 ```
