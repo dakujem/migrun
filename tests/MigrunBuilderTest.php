@@ -370,8 +370,7 @@ final class MigrunBuilderTest extends TestCase
     public function testRecursiveCanBeDisabled(): void
     {
         $orchestrator = (new MigrunBuilder())
-            ->directory($this->dir)
-            ->recursive(false)
+            ->directory($this->dir, recursive: false)
             ->build();
 
         $finder = $this->prop($orchestrator, 'finder');
@@ -401,7 +400,6 @@ final class MigrunBuilderTest extends TestCase
         self::assertSame($builder, $builder->fileStorage(null));
         self::assertSame($builder, $builder->sqliteStorage(null));
         self::assertSame($builder, $builder->pdoStorage(null));
-        self::assertSame($builder, $builder->recursive(false));
     }
 
     // -------------------------------------------------------------------------
@@ -438,6 +436,7 @@ final class MigrunBuilderTest extends TestCase
         $subclass = new class($dir) extends MigrunBuilder {
             public function __construct(string $dir)
             {
+                // Subclasses can still set $recursive directly.
                 $this->directory = $dir;
                 $this->recursive = false;
             }
@@ -466,7 +465,7 @@ final class MigrunBuilderTest extends TestCase
             }
         };
 
-        $result = $subclass->recursive(false);
+        $result = $subclass->directory($dir, recursive: false);
         self::assertInstanceOf($subclass::class, $result);
     }
 }

@@ -34,7 +34,6 @@ use Psr\Container\ContainerInterface;
  *       ->directory(__DIR__ . '/migrations')
  *       ->container($container)
  *       ->build();
- *
  * Storage backends (mutually exclusive — build() throws if more than one is set):
  *
  *   ->fileStorage('/path/to/migrun.json')   JSON file (default when nothing is set)
@@ -68,10 +67,13 @@ class MigrunBuilder
      * Path to the directory that holds migration files.
      * Required — build() throws if this is not set.
      * Pass null to unset.
+     *
+     * Set $recursive to false to disable subdirectory scanning (default: true).
      */
-    public function directory(?string $directory): static
+    public function directory(?string $directory, bool $recursive = true): static
     {
         $this->directory = $directory;
+        $this->recursive = $recursive;
         return $this;
     }
 
@@ -131,16 +133,6 @@ class MigrunBuilder
     {
         $this->pdo = $pdo;
         $this->pdoTable = $table;
-        return $this;
-    }
-
-    /**
-     * Whether the finder should scan subdirectories recursively.
-     * Defaults to true.
-     */
-    public function recursive(bool $recursive = true): static
-    {
-        $this->recursive = $recursive;
         return $this;
     }
 

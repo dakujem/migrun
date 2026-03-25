@@ -137,9 +137,8 @@ $orchestrator = (new MigrunBuilder())
 use Dakujem\Migrun\MigrunBuilder;
 
 $orchestrator = (new MigrunBuilder())
-    ->directory(__DIR__ . '/migrations')       // required
-    ->container($container)                    // PSR-11 container; omit for no-autowiring mode
-    ->recursive(false)                         // scan subdirectories (default: true)
+    ->directory(__DIR__ . '/migrations')           // required; pass recursive: false to disable subdirectory scanning
+    ->container($container)                        // PSR-11 container; omit for no-autowiring mode
     ->build();
 ```
 
