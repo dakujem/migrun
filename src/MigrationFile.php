@@ -7,8 +7,8 @@ namespace Dakujem\Migrun;
 /**
  * Represents a single migration file on disk.
  *
- * Carries the absolute path, the stable ID (derived by the finder that produced
- * this instance), and an optional human-readable name.
+ * Carries the absolute path and the stable ID derived by the finder that
+ * produced this instance.
  *
  * There is no assumption about the filename format — all parsing is the
  * responsibility of the finder implementation.
@@ -18,7 +18,6 @@ final readonly class MigrationFile
     public function __construct(
         private string $path,
         private string $id,
-        private ?string $name = null,
     ) {
     }
 
@@ -38,13 +37,5 @@ final readonly class MigrationFile
     public function id(): string
     {
         return $this->id;
-    }
-
-    /**
-     * Optional human-readable name provided by the finder, or null if not available.
-     */
-    public function name(): ?string
-    {
-        return $this->name;
     }
 }

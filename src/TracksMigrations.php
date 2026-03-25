@@ -15,8 +15,8 @@ interface TracksMigrations
      * Returns history entries of migrations that have already been applied,
      * most-recent first.
      *
-     * Each entry carries the migration ID, the optional name, and the timestamp
-     * of when the migration was run.
+     * Each entry carries the migration ID and the timestamp of when the
+     * migration was run.
      *
      * @return iterable<MigrationHistoryEntry>
      */

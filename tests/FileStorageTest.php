@@ -31,9 +31,9 @@ final class FileStorageTest extends TestCase
     // Helpers
     // -------------------------------------------------------------------------
 
-    private function migrationFile(string $id, ?string $name = null): MigrationFile
+    private function migrationFile(string $id): MigrationFile
     {
-        return new MigrationFile(path: "/migrations/{$id}.php", id: $id, name: $name);
+        return new MigrationFile(path: "/migrations/{$id}.php", id: $id);
     }
 
     /** Extract IDs from getApplied() for assertions that only care about ordering. */
@@ -55,7 +55,7 @@ final class FileStorageTest extends TestCase
     public function testMarkAppliedPersistsEntry(): void
     {
         $storage = new JsonFileStorage($this->storagePath);
-        $migration = $this->migrationFile('20240101_120000_create_users', 'create_users');
+        $migration = $this->migrationFile('20240101_120000_create_users');
         $at = new DateTimeImmutable('2024-06-15T10:30:00+00:00');
 
         $storage->markApplied($migration, $at);
@@ -64,7 +64,6 @@ final class FileStorageTest extends TestCase
         self::assertCount(1, $applied);
         self::assertInstanceOf(MigrationHistoryEntry::class, $applied[0]);
         self::assertSame('20240101_120000_create_users', $applied[0]->id());
-        self::assertSame('create_users', $applied[0]->name());
         self::assertEquals($at, $applied[0]->ranAt());
     }
 
@@ -157,7 +156,7 @@ final class FileStorageTest extends TestCase
         file_put_contents(
             $this->storagePath,
             json_encode([
-                ['id' => '20240101_120000_create_users', 'name' => 'create_users', 'ran_at' => '2024-01-01T12:00:00+00:00'],
+                ['id' => '20240101_120000_create_users', 'ran_at' => '2024-01-01T12:00:00+00:00'],
             ], JSON_PRETTY_PRINT) . "\n",
         );
 
@@ -166,7 +165,6 @@ final class FileStorageTest extends TestCase
 
         self::assertCount(1, $applied);
         self::assertSame('20240101_120000_create_users', $applied[0]->id());
-        self::assertSame('create_users', $applied[0]->name());
         self::assertEquals(
             new DateTimeImmutable('2024-01-01T12:00:00+00:00'),
             $applied[0]->ranAt(),
@@ -179,8 +177,8 @@ final class FileStorageTest extends TestCase
         file_put_contents(
             $this->storagePath,
             json_encode([
-                ['id' => '20240101_120000_create_users', 'name' => 'create_users', 'timestamp' => '20240101_120000'],
-                ['id' => '20240115_090000_add_index', 'name' => 'add_index', 'timestamp' => '20240115_090000'],
+                ['id' => '20240101_120000_create_users', 'timestamp' => '20240101_120000'],
+                ['id' => '20240115_090000_add_index', 'timestamp' => '20240115_090000'],
             ], JSON_PRETTY_PRINT) . "\n",
         );
 
@@ -211,7 +209,5 @@ final class FileStorageTest extends TestCase
         // most-recent-first (storage order reversed)
         self::assertSame('20240115_090000_add_index', $applied[0]->id());
         self::assertSame('20240101_120000_create_users', $applied[1]->id());
-        // name is null for plain-string legacy entries
-        self::assertNull($applied[0]->name());
     }
 }

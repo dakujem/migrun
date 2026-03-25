@@ -9,9 +9,8 @@ use DateTimeImmutable;
 /**
  * A record of a migration that has been executed.
  *
- * Carries the migration ID, an optional human-readable name, and the timestamp
- * of when the migration was run. The timestamp is set at execution time — it is
- * NOT derived from the filename.
+ * Carries the migration ID and the timestamp of when the migration was run.
+ * The timestamp is set at execution time — it is NOT derived from the filename.
  *
  * Storage implementations construct and return instances of this class to
  * represent history without needing access to the filesystem.
@@ -21,7 +20,6 @@ final readonly class MigrationHistoryEntry
     public function __construct(
         private string $id,
         private DateTimeImmutable $ranAt,
-        private ?string $name = null,
     ) {
     }
 
@@ -35,11 +33,5 @@ final readonly class MigrationHistoryEntry
     public function ranAt(): DateTimeImmutable
     {
         return $this->ranAt;
-    }
-
-    /** Optional human-readable name provided by the finder, or null if not available. */
-    public function name(): ?string
-    {
-        return $this->name;
     }
 }

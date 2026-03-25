@@ -15,13 +15,12 @@ use RuntimeException;
  *
  * File format — a JSON array of entry objects in execution order:
  * [
- *   {"id": "20240101_120000_create_users", "name": "create_users", "ran_at": "2024-01-01T12:00:00+00:00"},
- *   {"id": "20240115_090000_add_email_index", "name": "add_email_index", "ran_at": "2024-01-15T09:00:00+00:00"}
+ *   {"id": "20240101_120000_create_users", "ran_at": "2024-01-01T12:00:00+00:00"},
+ *   {"id": "20240115_090000_add_email_index", "ran_at": "2024-01-15T09:00:00+00:00"}
  * ]
  *
  * The "ran_at" timestamp records when the migration was executed, not when it
- * was created. The optional "name" field carries a human-readable label
- * provided by the finder.
+ * was created.
  *
  * This is intentionally human-readable and VCS-friendly.
  */
@@ -64,7 +63,6 @@ final class JsonFileStorage implements TracksMigrations
         $all[] = new MigrationHistoryEntry(
             id: $migration->id(),
             ranAt: $at ?? new DateTimeImmutable(), // current time
-            name: $migration->name(),
         );
         $this->persist($all);
     }
@@ -114,31 +112,29 @@ final class JsonFileStorage implements TracksMigrations
      * Deserialise one row from the JSON file into a MigrationHistoryEntry.
      *
      * Accepts:
-     *   - New format:    {"id": "...", "name": "...", "ran_at": "<ISO 8601>"}
-     *   - Legacy format: {"id": "...", "name": "...", "timestamp": "Ymd_His"}
+     *   - New format:    {"id": "...", "ran_at": "<ISO 8601>"}
+     *   - Legacy format: {"id": "...", "timestamp": "Ymd_His"}
      *   - Plain string:  "20240101_120000_create_users"
      */
     private function rowToEntry(mixed $row): MigrationHistoryEntry
     {
-        // New format: {"id": "...", "name": "...", "ran_at": "..."}
+        // New format: {"id": "...", "ran_at": "..."}
         if (is_array($row) && isset($row['id'], $row['ran_at'])) {
             $ranAt = DateTimeImmutable::createFromFormat(DateTimeImmutable::ATOM, $row['ran_at'])
                 ?: new DateTimeImmutable('@0');
             return new MigrationHistoryEntry(
                 id: $row['id'],
                 ranAt: $ranAt,
-                name: $row['name'] ?? null,
             );
         }
 
-        // Legacy format: {"id": "...", "name": "...", "timestamp": "Ymd_His"}
+        // Legacy format: {"id": "...", "timestamp": "Ymd_His"}
         if (is_array($row) && isset($row['id'], $row['timestamp'])) {
             $ranAt = DateTimeImmutable::createFromFormat('Ymd_His', $row['timestamp'])
                 ?: new DateTimeImmutable('@0');
             return new MigrationHistoryEntry(
                 id: $row['id'],
                 ranAt: $ranAt,
-                name: $row['name'] ?? null,
             );
         }
 
@@ -147,7 +143,6 @@ final class JsonFileStorage implements TracksMigrations
             return new MigrationHistoryEntry(
                 id: $row,
                 ranAt: new DateTimeImmutable('@0'),
-                name: null,
             );
         }
 
@@ -169,7 +164,6 @@ final class JsonFileStorage implements TracksMigrations
         $rows = array_map(
             fn(MigrationHistoryEntry $e) => [
                 'id' => $e->id(),
-                'name' => $e->name(),
                 'ran_at' => $e->ranAt()->format(DateTimeImmutable::ATOM),
             ],
             $entries,
