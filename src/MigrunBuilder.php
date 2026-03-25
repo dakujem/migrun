@@ -119,7 +119,11 @@ class MigrunBuilder
             return $this->directory . '/.migrun/migrun.json';
         }
 
-        if (is_dir($this->storage)) {
+        if (
+            is_dir($this->storage) ||
+            pathinfo($this->storage, PATHINFO_EXTENSION) === '' ||
+            pathinfo($this->storage, PATHINFO_FILENAME) === ''
+        ) {
             return rtrim($this->storage, '/\\') . '/migrun.json';
         }
 

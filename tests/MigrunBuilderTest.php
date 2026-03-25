@@ -174,6 +174,21 @@ final class MigrunBuilderTest extends TestCase
         self::assertSame($file, $storagePath);
     }
 
+    public function testNonExistentDirectoryStoragePathGetsMigrunJsonAppended(): void
+    {
+        $storageDir = $this->dir . '/.migrun'; // does not exist yet
+
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->storage($storageDir)
+            ->build();
+
+        $storage = $this->prop($orchestrator, 'storage');
+        $storagePath = $this->prop($storage, 'filePath');
+
+        self::assertSame($storageDir . '/migrun.json', $storagePath);
+    }
+
     public function testExistingDirectoryStoragePathGetsMigrunJsonAppended(): void
     {
         $storageDir = $this->dir . '/store';
