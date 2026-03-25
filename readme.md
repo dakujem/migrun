@@ -86,9 +86,9 @@ return new class implements ReversibleMigration
 
 ## Quick setup
 
-### Minimal — no container, no autowiring
+### Recommended — PDO storage with a container
 
-The simplest possible setup. Migration files must accept no arguments (or have all defaults).
+The most practical setup: store the migration history in the **same database you are migrating**. This keeps everything in one place, avoids a separate file to manage or gitignore, and lets the history participate in database backups and restores naturally.
 
 ```php
 <?php
@@ -97,8 +97,15 @@ require __DIR__ . '/vendor/autoload.php';
 
 use Dakujem\Migrun\MigrunBuilder;
 
+$container = require __DIR__ . '/bootstrap/container.php'; // any PSR-11 container
+
+// $pdo is resolved from the container — the same database being migrated
+$pdo = $container->get(PDO::class);
+
 $orchestrator = (new MigrunBuilder())
     ->directory(__DIR__ . '/migrations')
+    ->container($container)   // enables autowiring of migration parameters
+    ->pdoStorage($pdo)        // history stored in the same DB, table: migrun_migrations
     ->build();
 
 $executed = $orchestrator->run();
@@ -107,28 +114,27 @@ foreach ($executed as $migration) {
 }
 ```
 
-Storage defaults to `{migrations-dir}/.migrun/migrun.json` — no extra configuration needed.
+`PdoStorage` creates the history table automatically on first use. Works with MySQL, PostgreSQL, SQLite, and any other PDO-compatible database.
 
-> **Important:** The storage file tracks which migrations have already run. If it is committed to version control and then overwritten (e.g. reset to an earlier state or deleted), Migrun will re-run migrations that have already been applied. Add the file to `.gitignore` to prevent this:
+
+### Minimal — no options
+
+The absolute minimum: only the migrations directory is required. Everything else uses built-in defaults.
+
+```php
+$orchestrator = (new MigrunBuilder())
+    ->directory(__DIR__ . '/migrations')
+    ->build();
+```
+
+Storage defaults to `{migrations-dir}/.migrun/migrun.json` — no extra configuration needed. Migration files must accept no arguments (or have all defaults).
+
+> **Important:** The default JSON storage file tracks which migrations have already run. If it is committed to version control and then overwritten (e.g. reset to an earlier state or deleted), Migrun will re-run migrations that have already been applied. Add the file to `.gitignore` to prevent this:
 > ```
 > # migrun storage
 > {migrations-dir}/.migrun/*
 > ```
-> This covers both the default JSON file and the default SQLite file, since both live under `.migrun/`. If you configure a custom storage path, gitignore that path instead.
-
-
-### With a PSR-11 container (autowiring)
-
-Migration parameters are resolved from the container by type name.
-
-```php
-$container = require __DIR__ . '/bootstrap/container.php'; // any PSR-11 container
-
-$orchestrator = (new MigrunBuilder())
-    ->directory(__DIR__ . '/migrations')
-    ->container($container)
-    ->build();
-```
+> This covers both the default JSON file and the default SQLite file, since both live under `.migrun/`. If you configure a custom storage path, gitignore that path instead. Using PDO storage in the same database avoids this concern entirely.
 
 
 ### All builder options
@@ -139,25 +145,26 @@ use Dakujem\Migrun\MigrunBuilder;
 $orchestrator = (new MigrunBuilder())
     ->directory(__DIR__ . '/migrations')           // required; pass recursive: false to disable subdirectory scanning
     ->container($container)                        // PSR-11 container; omit for no-autowiring mode
+    ->pdoStorage($pdo)                             // recommended: history in the same DB as migrations
     ->build();
 ```
 
 **Storage backend** (mutually exclusive — `build()` throws if more than one is set):
 
 ```php
-// JSON file — default when nothing is set
-->fileStorage(__DIR__ . '/var/migrun')     // directory → appends /migrun.json
-                                           // file path → used as-is
-                                           // omit → {migrations-dir}/.migrun/migrun.json
+// Any PDO connection (MySQL, PostgreSQL, SQLite, …) — recommended
+->pdoStorage($pdo)                                // default table name (migrun_migrations)
+->pdoStorage($pdo, table: 'schema_history')       // custom table name
 
 // SQLite database file
 ->sqliteStorage()                                 // {migrations-dir}/.migrun/migrun.sqlite
 ->sqliteStorage(__DIR__ . '/var/history.sqlite')  // explicit path
 ->sqliteStorage(table: 'schema_history')          // default path, custom table name
 
-// Any PDO connection (MySQL, PostgreSQL, SQLite, …)
-->pdoStorage($pdo)                                // default table name (migrun_migrations)
-->pdoStorage($pdo, table: 'schema_history')       // custom table name
+// JSON file — default when nothing is set
+->fileStorage(__DIR__ . '/var/migrun')     // directory → appends /migrun.json
+                                           // file path → used as-is
+                                           // omit → {migrations-dir}/.migrun/migrun.json
 ```
 
 
