@@ -117,7 +117,7 @@ final class JsonFileStorage implements TracksMigrations
     {
         if (is_array($row) && isset($row['id'], $row['at'])) {
             $at = DateTimeImmutable::createFromFormat(DateTimeImmutable::ATOM, $row['at'])
-                ?: new DateTimeImmutable('@0');
+                ?: throw new RuntimeException("Migration storage file is corrupted or not valid JSON: {$this->filePath}");
             return new MigrationHistoryEntry(
                 id: $row['id'],
                 at: $at,

@@ -118,6 +118,20 @@ final class FileStorageTest extends TestCase
         $storage->getApplied();
     }
 
+    public function testThrowsOnMalformedAtTimestamp(): void
+    {
+        file_put_contents(
+            $this->storagePath,
+            json_encode([
+                ['id' => '20240101_120000_create_users', 'at' => 'not-a-timestamp'],
+            ], JSON_PRETTY_PRINT) . "\n",
+        );
+        $storage = new JsonFileStorage($this->storagePath);
+
+        $this->expectException(RuntimeException::class);
+        $storage->getApplied();
+    }
+
     // -------------------------------------------------------------------------
     // isApplied
     // -------------------------------------------------------------------------
