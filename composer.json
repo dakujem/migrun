@@ -1,6 +1,6 @@
 {
   "name": "dakujem/migrun",
-  "description": "A lightweight, flexible migration runner for PHP environments.",
+  "description": "Lightweight, flexible, framework-and-database-agnostic migration runner.",
   "type": "library",
   "license": "Unlicense",
   "keywords": ["migration", "runner", "database", "schema"],
