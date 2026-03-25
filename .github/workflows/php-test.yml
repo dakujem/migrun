@@ -1,0 +1,72 @@
+name: Test Suite
+
+on:
+  push:
+  pull_request:
+    branches: [ trunk ]
+
+  workflow_dispatch:
+
+jobs:
+  php-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - php: '8.2'
+            composer-flags: '--prefer-lowest'
+          - php: '8.2'
+          - php: '8.3'
+          - php: '8.4'
+          - php: '8.5'
+            #allow_failure: true
+
+    name: "PHP${{ matrix.php }} ${{ matrix.composer-flags }}"
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: pcov
+
+      - name: Validate composer.json
+        run: composer validate
+
+      - name: Cache Composer packages
+        id: composer-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-php${{ matrix.php }}-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-php${{ matrix.php }}-
+
+      - name: Install composer dependencies
+        run: composer update -o --no-interaction --no-progress --prefer-dist ${{ matrix.composer-flags }}
+        continue-on-error: ${{ matrix.allow_failure == true }}
+
+      - name: Run test suite
+        run: composer test:ci -- --coverage-clover tests/output/coverage.xml
+        continue-on-error: ${{ matrix.allow_failure == true }}
+
+      - name: Upload coverage to Coveralls
+        if: ${{ !matrix.allow_failure }}
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          flag-name: "PHP${{ matrix.php }}"
+          parallel: true
+          file: tests/output/coverage.xml
+
+  coveralls-finish:
+    needs: php-tests
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Coveralls when build is finished
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          parallel-finished: true

@@ -1,0 +1,74 @@
+---
+# GitLab CI — mirrors the GitHub Actions workflow structure.
+# See also: .github/workflows/php-test.yml
+
+stages:
+  - test
+  - coverage
+
+.php-test-base:
+  stage: test
+  before_script:
+    - composer validate
+    - composer update -o --no-interaction --no-progress --prefer-dist $COMPOSER_FLAGS
+  script:
+    - composer test:ci -- --coverage-clover tests/output/coverage.xml
+  artifacts:
+    when: always
+    paths:
+      - tests/output/coverage.xml
+    expire_in: 1 hour
+  cache:
+    key: "composer-php${PHP_VERSION}"
+    paths:
+      - vendor/
+
+php-8.2:
+  extends: .php-test-base
+  image: php:8.2-cli
+  variables:
+    PHP_VERSION: "8.2"
+    COMPOSER_FLAGS: "--prefer-lowest"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq unzip git
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - pecl install pcov && docker-php-ext-enable pcov
+    - composer validate
+    - composer update -o --no-interaction --no-progress --prefer-dist
+
+php-8.3:
+  extends: .php-test-base
+  image: php:8.3-cli
+  variables:
+    PHP_VERSION: "8.3"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq unzip git
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - pecl install pcov && docker-php-ext-enable pcov
+    - composer validate
+    - composer update -o --no-interaction --no-progress --prefer-dist
+
+php-8.4:
+  extends: .php-test-base
+  image: php:8.4-cli
+  variables:
+    PHP_VERSION: "8.4"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq unzip git
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - pecl install pcov && docker-php-ext-enable pcov
+    - composer validate
+    - composer update -o --no-interaction --no-progress --prefer-dist
+
+php-8.5:
+  extends: .php-test-base
+  image: php:8.5-rc-cli
+  variables:
+    PHP_VERSION: "8.5"
+#  allow_failure: true
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq unzip git
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - pecl install pcov && docker-php-ext-enable pcov
+    - composer validate
+    - composer update -o --no-interaction --no-progress --prefer-dist
