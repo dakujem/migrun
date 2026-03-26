@@ -82,7 +82,7 @@ final class PdoStorage implements TracksMigrations
         return $stmt->fetchColumn() !== false;
     }
 
-    public function markApplied(string $id, ?DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?DateTimeInterface $at = null): void
     {
         $this->ensureTable();
 

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Dakujem\Migrun;
 
-use DateTimeImmutable;
+use DateTimeInterface;
 
 /**
  * A record of a migration that has been executed.
@@ -19,7 +19,7 @@ final readonly class MigrationHistoryEntry
 {
     public function __construct(
         private string $id,
-        private DateTimeImmutable $at,
+        private DateTimeInterface $at,
     ) {
     }
 
@@ -30,7 +30,7 @@ final readonly class MigrationHistoryEntry
     }
 
     /** The timestamp of when the migration was run. */
-    public function at(): DateTimeImmutable
+    public function at(): DateTimeInterface
     {
         return $this->at;
     }

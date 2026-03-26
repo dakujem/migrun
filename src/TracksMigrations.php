@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Dakujem\Migrun;
 
-use DateTimeImmutable;
+use DateTimeInterface;
 
 /**
  * Tracks which migrations have already been executed.
@@ -37,7 +37,7 @@ interface TracksMigrations
      *
      * Implementations should capture the current time as the run timestamp.
      */
-    public function markApplied(string $id, ?DateTimeImmutable $at = null): void;
+    public function markApplied(string $id, ?DateTimeInterface $at = null): void;
 
     /**
      * Remove a migration from the history (after a successful rollback).

@@ -7,6 +7,7 @@ namespace Dakujem\Migrun\Storage;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\TracksMigrations;
 use DateTimeImmutable;
+use DateTimeInterface;
 use RuntimeException;
 
 /**
@@ -51,7 +52,7 @@ final class JsonFileStorage implements TracksMigrations
         return false;
     }
 
-    public function markApplied(string $id, ?DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?DateTimeInterface $at = null): void
     {
         $all = $this->readAll();
         foreach ($all as $entry) {

@@ -84,7 +84,7 @@ final class MysqliStorage implements TracksMigrations
         return $found;
     }
 
-    public function markApplied(string $id, ?DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?DateTimeInterface $at = null): void
     {
         $this->ensureTable();
 
