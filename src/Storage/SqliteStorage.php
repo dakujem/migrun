@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dakujem\Migrun\Storage;
 
 use Dakujem\Migrun\TracksMigrations;
+use DateTimeImmutable;
 use PDO;
 
 /**
@@ -45,18 +46,18 @@ final readonly class SqliteStorage implements TracksMigrations
         return $this->inner->getApplied();
     }
 
-    public function isApplied(\Dakujem\Migrun\MigrationFile $migration): bool
+    public function isApplied(string $id): bool
     {
-        return $this->inner->isApplied($migration);
+        return $this->inner->isApplied($id);
     }
 
-    public function markApplied(\Dakujem\Migrun\MigrationFile $migration, ?\DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?DateTimeImmutable $at = null): void
     {
-        $this->inner->markApplied($migration, $at);
+        $this->inner->markApplied($id, $at);
     }
 
-    public function markReverted(\Dakujem\Migrun\MigrationFile $migration, ?\DateTimeImmutable $at = null): void
+    public function markReverted(string $id): void
     {
-        $this->inner->markReverted($migration, $at);
+        $this->inner->markReverted($id);
     }
 }

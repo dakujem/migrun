@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Dakujem\Migrun\Storage;
 
-use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\TracksMigrations;
 use DateTimeImmutable;
@@ -68,27 +67,27 @@ final class PdoStorage implements TracksMigrations
         return $entries;
     }
 
-    public function isApplied(MigrationFile $migration): bool
+    public function isApplied(string $id): bool
     {
         $this->ensureTable();
 
         $stmt = $this->pdo->prepare(
             "SELECT 1 FROM {$this->table} WHERE id = ? LIMIT 1",
         );
-        if ($stmt === false || !$stmt->execute([$migration->id()])) {
+        if ($stmt === false || !$stmt->execute([$id])) {
             throw new RuntimeException("Could not query migration storage table: {$this->table}");
         }
 
         return $stmt->fetchColumn() !== false;
     }
 
-    public function markApplied(MigrationFile $migration, ?DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?DateTimeImmutable $at = null): void
     {
         $this->ensureTable();
 
         // Guard against duplicates: the primary key also enforces this at the
         // DB level, but we skip silently rather than propagating a DB error.
-        if ($this->isApplied($migration)) {
+        if ($this->isApplied($id)) {
             return;
         }
 
@@ -96,21 +95,21 @@ final class PdoStorage implements TracksMigrations
             "INSERT INTO {$this->table} (id, applied_at) VALUES (?, ?)",
         );
         if ($stmt === false || !$stmt->execute([
-                $migration->id(),
+                $id,
                 ($at ?? new DateTimeImmutable())->setTimezone(new \DateTimeZone('UTC'))->format(DateTimeImmutable::ATOM),
             ])) {
             throw new RuntimeException("Could not insert into migration storage table: {$this->table}");
         }
     }
 
-    public function markReverted(MigrationFile $migration, ?DateTimeImmutable $at = null): void
+    public function markReverted(string $id): void
     {
         $this->ensureTable();
 
         $stmt = $this->pdo->prepare(
             "DELETE FROM {$this->table} WHERE id = ?",
         );
-        if ($stmt === false || !$stmt->execute([$migration->id()])) {
+        if ($stmt === false || !$stmt->execute([$id])) {
             throw new RuntimeException("Could not delete from migration storage table: {$this->table}");
         }
     }

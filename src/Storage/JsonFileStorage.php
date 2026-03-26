@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Dakujem\Migrun\Storage;
 
-use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\TracksMigrations;
 use DateTimeImmutable;
@@ -42,35 +41,35 @@ final class JsonFileStorage implements TracksMigrations
         return array_reverse($this->readAll());
     }
 
-    public function isApplied(MigrationFile $migration): bool
+    public function isApplied(string $id): bool
     {
         foreach ($this->readAll() as $entry) {
-            if ($entry->id() === $migration->id()) {
+            if ($entry->id() === $id) {
                 return true;
             }
         }
         return false;
     }
 
-    public function markApplied(MigrationFile $migration, ?DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?DateTimeImmutable $at = null): void
     {
         $all = $this->readAll();
         foreach ($all as $entry) {
-            if ($entry->id() === $migration->id()) {
+            if ($entry->id() === $id) {
                 return; // already present, no duplicates
             }
         }
         $all[] = new MigrationHistoryEntry(
-            id: $migration->id(),
+            id: $id,
             at: $at ?? new DateTimeImmutable(), // current time
         );
         $this->persist($all);
     }
 
-    public function markReverted(MigrationFile $migration, ?DateTimeImmutable $at = null): void
+    public function markReverted(string $id): void
     {
         $all = $this->readAll();
-        $all = array_values(array_filter($all, fn(MigrationHistoryEntry $e) => $e->id() !== $migration->id()));
+        $all = array_values(array_filter($all, fn(MigrationHistoryEntry $e) => $e->id() !== $id));
         $this->persist($all);
     }
 

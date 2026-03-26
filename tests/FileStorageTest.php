@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Dakujem\Migrun\Tests;
 
 use DateTimeImmutable;
-use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\Storage\JsonFileStorage;
 use PHPUnit\Framework\TestCase;
@@ -31,11 +30,6 @@ final class FileStorageTest extends TestCase
     // Helpers
     // -------------------------------------------------------------------------
 
-    private function migrationFile(string $id): MigrationFile
-    {
-        return new MigrationFile(path: "/migrations/{$id}.php", id: $id);
-    }
-
     /** Extract IDs from getApplied() for assertions that only care about ordering. */
     private function appliedIds(JsonFileStorage $storage): array
     {
@@ -55,10 +49,9 @@ final class FileStorageTest extends TestCase
     public function testMarkAppliedPersistsEntry(): void
     {
         $storage = new JsonFileStorage($this->storagePath);
-        $migration = $this->migrationFile('20240101_120000_create_users');
         $at = new DateTimeImmutable('2024-06-15T10:30:00+00:00');
 
-        $storage->markApplied($migration, $at);
+        $storage->markApplied('20240101_120000_create_users', $at);
 
         $applied = iterator_to_array($storage->getApplied());
         self::assertCount(1, $applied);
@@ -70,10 +63,9 @@ final class FileStorageTest extends TestCase
     public function testMarkAppliedDoesNotDuplicate(): void
     {
         $storage = new JsonFileStorage($this->storagePath);
-        $migration = $this->migrationFile('20240101_120000_create_users');
 
-        $storage->markApplied($migration);
-        $storage->markApplied($migration);
+        $storage->markApplied('20240101_120000_create_users');
+        $storage->markApplied('20240101_120000_create_users');
 
         self::assertCount(1, $storage->getApplied());
     }
@@ -81,12 +73,10 @@ final class FileStorageTest extends TestCase
     public function testMarkRevertedRemovesEntry(): void
     {
         $storage = new JsonFileStorage($this->storagePath);
-        $m1 = $this->migrationFile('20240101_120000_create_users');
-        $m2 = $this->migrationFile('20240115_090000_add_index');
 
-        $storage->markApplied($m1);
-        $storage->markApplied($m2);
-        $storage->markReverted($m1);
+        $storage->markApplied('20240101_120000_create_users');
+        $storage->markApplied('20240115_090000_add_index');
+        $storage->markReverted('20240101_120000_create_users');
 
         self::assertSame(['20240115_090000_add_index'], $this->appliedIds($storage));
     }
@@ -94,13 +84,10 @@ final class FileStorageTest extends TestCase
     public function testReturnsAppliedMostRecentFirst(): void
     {
         $storage = new JsonFileStorage($this->storagePath);
-        $m1 = $this->migrationFile('20240101_120000_alpha');
-        $m2 = $this->migrationFile('20240115_090000_beta');
-        $m3 = $this->migrationFile('20240120_080000_gamma');
 
-        $storage->markApplied($m1);
-        $storage->markApplied($m2);
-        $storage->markApplied($m3);
+        $storage->markApplied('20240101_120000_alpha');
+        $storage->markApplied('20240115_090000_beta');
+        $storage->markApplied('20240120_080000_gamma');
 
         self::assertSame([
             '20240120_080000_gamma',
@@ -139,26 +126,23 @@ final class FileStorageTest extends TestCase
     public function testIsAppliedReturnsTrueForAppliedMigration(): void
     {
         $storage = new JsonFileStorage($this->storagePath);
-        $m = $this->migrationFile('20240101_120000_create_users');
-        $storage->markApplied($m);
+        $storage->markApplied('20240101_120000_create_users');
 
-        self::assertTrue($storage->isApplied($m));
+        self::assertTrue($storage->isApplied('20240101_120000_create_users'));
     }
 
     public function testIsAppliedReturnsFalseForUnknownId(): void
     {
         $storage = new JsonFileStorage($this->storagePath);
-        $m = $this->migrationFile('20240101_120000_create_users');
 
-        self::assertFalse($storage->isApplied($m));
+        self::assertFalse($storage->isApplied('20240101_120000_create_users'));
     }
 
     public function testIsAppliedReturnsFalseWhenFileDoesNotExist(): void
     {
         $storage = new JsonFileStorage($this->storagePath);
-        $m = $this->migrationFile('20240101_120000_anything');
 
-        self::assertFalse($storage->isApplied($m));
+        self::assertFalse($storage->isApplied('20240101_120000_anything'));
     }
 
     // -------------------------------------------------------------------------

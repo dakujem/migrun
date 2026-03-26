@@ -41,11 +41,11 @@ final readonly class Orchestrator
 
         $executed = [];
         foreach ($all as $migration) {
-            if ($this->storage->isApplied($migration)) {
+            if ($this->storage->isApplied($migration->id())) {
                 continue;
             }
             $this->executor->execute($migration, Direction::Up);
-            $this->storage->markApplied($migration);
+            $this->storage->markApplied($migration->id());
             $executed[] = $migration;
         }
 
@@ -76,7 +76,7 @@ final readonly class Orchestrator
         foreach ($targets as $entry) {
             $migration = $available[$entry->id()];
             $this->executor->execute($migration, Direction::Down);
-            $this->storage->markReverted($migration);
+            $this->storage->markReverted($migration->id());
             $reverted[] = $migration;
         }
 

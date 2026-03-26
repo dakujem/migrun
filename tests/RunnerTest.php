@@ -48,22 +48,22 @@ final class SpyStorage implements TracksMigrations
         );
     }
 
-    public function isApplied(MigrationFile $migration): bool
+    public function isApplied(string $id): bool
     {
         $history = $this->fullHistory !== [] ? $this->fullHistory : $this->applied;
-        return in_array($migration->id(), $history, strict: true);
+        return in_array($id, $history, strict: true);
     }
 
-    public function markApplied(MigrationFile $migration, ?\DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?\DateTimeImmutable $at = null): void
     {
-        $this->applied[] = $migration->id();
-        $this->markedApplied[] = $migration->id();
+        $this->applied[] = $id;
+        $this->markedApplied[] = $id;
     }
 
-    public function markReverted(MigrationFile $migration, ?\DateTimeImmutable $at = null): void
+    public function markReverted(string $id): void
     {
-        $this->applied = array_values(array_filter($this->applied, fn($id) => $id !== $migration->id()));
-        $this->markedReverted[] = $migration->id();
+        $this->applied = array_values(array_filter($this->applied, fn($i) => $i !== $id));
+        $this->markedReverted[] = $id;
     }
 }
 

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Dakujem\Migrun\Storage;
 
-use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\TracksMigrations;
 use DateTimeImmutable;
@@ -67,11 +66,11 @@ final class MysqliStorage implements TracksMigrations
         return $entries;
     }
 
-    public function isApplied(MigrationFile $migration): bool
+    public function isApplied(string $id): bool
     {
         $this->ensureTable();
 
-        $id = $this->mysqli->real_escape_string($migration->id());
+        $id = $this->mysqli->real_escape_string($id);
         $result = $this->mysqli->query(
             "SELECT 1 FROM `{$this->table}` WHERE id = '{$id}' LIMIT 1",
         );
@@ -84,32 +83,32 @@ final class MysqliStorage implements TracksMigrations
         return $found;
     }
 
-    public function markApplied(MigrationFile $migration, ?DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?DateTimeImmutable $at = null): void
     {
         $this->ensureTable();
 
-        if ($this->isApplied($migration)) {
+        if ($this->isApplied($id)) {
             return;
         }
 
-        $id = $this->mysqli->real_escape_string($migration->id());
+        $escapedId = $this->mysqli->real_escape_string($id);
         $appliedAt = $this->mysqli->real_escape_string(
             ($at ?? new DateTimeImmutable())->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
         );
 
         $ok = $this->mysqli->query(
-            "INSERT INTO `{$this->table}` (id, at) VALUES ('{$id}', '{$appliedAt}')",
+            "INSERT INTO `{$this->table}` (id, at) VALUES ('{$escapedId}', '{$appliedAt}')",
         );
         if ($ok === false) {
             throw new RuntimeException("Could not insert into migration storage table: {$this->table}");
         }
     }
 
-    public function markReverted(MigrationFile $migration, ?DateTimeImmutable $at = null): void
+    public function markReverted(string $id): void
     {
         $this->ensureTable();
 
-        $id = $this->mysqli->real_escape_string($migration->id());
+        $id = $this->mysqli->real_escape_string($id);
         $ok = $this->mysqli->query(
             "DELETE FROM `{$this->table}` WHERE id = '{$id}'",
         );

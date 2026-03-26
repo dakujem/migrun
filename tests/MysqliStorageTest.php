@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Dakujem\Migrun\Tests;
 
 use DateTimeImmutable;
-use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\Storage\MysqliStorage;
 use InvalidArgumentException;
@@ -76,11 +75,6 @@ final class MysqliStorageTest extends TestCase
         return $conn;
     }
 
-    private function migrationFile(string $id): MigrationFile
-    {
-        return new MigrationFile(path: "/migrations/{$id}.php", id: $id);
-    }
-
     private function storage(): MysqliStorage
     {
         return new MysqliStorage($this->conn, $this->table);
@@ -103,11 +97,10 @@ final class MysqliStorageTest extends TestCase
 
     public function testMarkAppliedPersistsEntry(): void
     {
-        $storage   = $this->storage();
-        $migration = $this->migrationFile('20240101_120000_create_users');
-        $at        = new DateTimeImmutable('2024-06-15T10:30:00+00:00');
+        $storage = $this->storage();
+        $at      = new DateTimeImmutable('2024-06-15T10:30:00+00:00');
 
-        $storage->markApplied($migration, $at);
+        $storage->markApplied('20240101_120000_create_users', $at);
 
         $applied = iterator_to_array($storage->getApplied());
         self::assertCount(1, $applied);
@@ -118,11 +111,10 @@ final class MysqliStorageTest extends TestCase
 
     public function testMarkAppliedDoesNotDuplicate(): void
     {
-        $storage   = $this->storage();
-        $migration = $this->migrationFile('20240101_120000_create_users');
+        $storage = $this->storage();
 
-        $storage->markApplied($migration);
-        $storage->markApplied($migration);
+        $storage->markApplied('20240101_120000_create_users');
+        $storage->markApplied('20240101_120000_create_users');
 
         self::assertCount(1, $storage->getApplied());
     }
@@ -130,12 +122,10 @@ final class MysqliStorageTest extends TestCase
     public function testMarkRevertedRemovesEntry(): void
     {
         $storage = $this->storage();
-        $m1      = $this->migrationFile('20240101_120000_create_users');
-        $m2      = $this->migrationFile('20240115_090000_add_index');
 
-        $storage->markApplied($m1);
-        $storage->markApplied($m2);
-        $storage->markReverted($m1);
+        $storage->markApplied('20240101_120000_create_users');
+        $storage->markApplied('20240115_090000_add_index');
+        $storage->markReverted('20240101_120000_create_users');
 
         self::assertSame(['20240115_090000_add_index'], $this->appliedIds($storage));
     }
@@ -143,13 +133,10 @@ final class MysqliStorageTest extends TestCase
     public function testReturnsAppliedMostRecentFirst(): void
     {
         $storage = $this->storage();
-        $m1      = $this->migrationFile('20240101_120000_alpha');
-        $m2      = $this->migrationFile('20240115_090000_beta');
-        $m3      = $this->migrationFile('20240120_080000_gamma');
 
-        $storage->markApplied($m1, new DateTimeImmutable('2024-01-01T12:00:00+00:00'));
-        $storage->markApplied($m2, new DateTimeImmutable('2024-01-15T09:00:00+00:00'));
-        $storage->markApplied($m3, new DateTimeImmutable('2024-01-20T08:00:00+00:00'));
+        $storage->markApplied('20240101_120000_alpha', new DateTimeImmutable('2024-01-01T12:00:00+00:00'));
+        $storage->markApplied('20240115_090000_beta', new DateTimeImmutable('2024-01-15T09:00:00+00:00'));
+        $storage->markApplied('20240120_080000_gamma', new DateTimeImmutable('2024-01-20T08:00:00+00:00'));
 
         self::assertSame([
             '20240120_080000_gamma',
@@ -165,23 +152,19 @@ final class MysqliStorageTest extends TestCase
     public function testIsAppliedReturnsTrueForAppliedMigration(): void
     {
         $storage = $this->storage();
-        $m       = $this->migrationFile('20240101_120000_create_users');
-        $storage->markApplied($m);
+        $storage->markApplied('20240101_120000_create_users');
 
-        self::assertTrue($storage->isApplied($m));
+        self::assertTrue($storage->isApplied('20240101_120000_create_users'));
     }
 
     public function testIsAppliedReturnsFalseForUnknownId(): void
     {
-        $storage = $this->storage();
-        $m       = $this->migrationFile('20240101_120000_create_users');
-
-        self::assertFalse($storage->isApplied($m));
+        self::assertFalse($this->storage()->isApplied('20240101_120000_create_users'));
     }
 
     public function testIsAppliedReturnsFalseWhenTableDoesNotExist(): void
     {
-        self::assertFalse($this->storage()->isApplied($this->migrationFile('anything')));
+        self::assertFalse($this->storage()->isApplied('anything'));
     }
 
     // -------------------------------------------------------------------------
@@ -191,7 +174,7 @@ final class MysqliStorageTest extends TestCase
     public function testTableIsCreatedAutomaticallyOnFirstUse(): void
     {
         $storage = $this->storage();
-        $storage->markApplied($this->migrationFile('20240101_120000_init'));
+        $storage->markApplied('20240101_120000_init');
 
         $result = $this->conn->query("SELECT COUNT(*) AS n FROM `{$this->table}`");
         self::assertSame(1, (int) $result->fetch_assoc()['n']);
@@ -205,7 +188,7 @@ final class MysqliStorageTest extends TestCase
     public function testMarkRevertedOnUnknownIdIsNoop(): void
     {
         $storage = $this->storage();
-        $storage->markReverted($this->migrationFile('nonexistent'));
+        $storage->markReverted('nonexistent');
 
         self::assertSame([], $this->appliedIds($storage));
     }

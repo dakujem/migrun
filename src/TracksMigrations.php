@@ -30,17 +30,17 @@ interface TracksMigrations
      * orchestrator from re-running already-executed migrations that fall outside
      * an active tracking window.
      */
-    public function isApplied(MigrationFile $migration): bool;
+    public function isApplied(string $id): bool;
 
     /**
      * Record a migration as successfully applied.
      *
      * Implementations should capture the current time as the run timestamp.
      */
-    public function markApplied(MigrationFile $migration, ?DateTimeImmutable $at = null): void;
+    public function markApplied(string $id, ?DateTimeImmutable $at = null): void;
 
     /**
      * Remove a migration from the history (after a successful rollback).
      */
-    public function markReverted(MigrationFile $migration, ?DateTimeImmutable $at = null): void;
+    public function markReverted(string $id): void;
 }
