@@ -100,9 +100,9 @@ final readonly class Orchestrator
      *   - Pending  — file is present on disk but has not been run yet
      *   - Missing  — recorded in history but the file no longer exists on disk
      *
-     * @return iterable<MigrationStatusEntry>
+     * @return array<MigrationStatusEntry>
      */
-    public function status(): iterable
+    public function status(): array
     {
         // Collect history: id => MigrationHistoryEntry
         $history = [];
