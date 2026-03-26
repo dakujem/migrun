@@ -21,7 +21,7 @@ use RuntimeException;
  *
  * Table schema (created automatically):
  *   id         VARCHAR(255) PRIMARY KEY  — stable migration identifier
- *   applied_at VARCHAR(32)  NOT NULL     — ISO 8601 timestamp of when it was run
+ *   applied_at TIMESTAMP    NOT NULL     — UTC datetime of when it was run
  *
  * The table name must be a plain identifier: letters, digits, and underscores
  * only, starting with a letter or underscore. Backtick quoting is used, which
@@ -94,7 +94,7 @@ final class MysqliStorage implements TracksMigrations
 
         $id = $this->mysqli->real_escape_string($migration->id());
         $appliedAt = $this->mysqli->real_escape_string(
-            ($at ?? new DateTimeImmutable())->format(DateTimeImmutable::ATOM),
+            ($at ?? new DateTimeImmutable())->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
         );
 
         $ok = $this->mysqli->query(
@@ -132,7 +132,7 @@ final class MysqliStorage implements TracksMigrations
         $ok = $this->mysqli->query(
             "CREATE TABLE IF NOT EXISTS `{$this->table}` (
                 id         VARCHAR(255) NOT NULL,
-                applied_at VARCHAR(32)  NOT NULL,
+                applied_at TIMESTAMP    NOT NULL,
                 PRIMARY KEY (id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         );
@@ -146,12 +146,12 @@ final class MysqliStorage implements TracksMigrations
     /**
      * Deserialise one row from the database into a MigrationHistoryEntry.
      *
-     * Expected keys: "id" (string), "applied_at" (ISO 8601 string).
+     * Expected keys: "id" (string), "applied_at" (UTC datetime string 'Y-m-d H:i:s').
      */
     private function rowToEntry(mixed $row): MigrationHistoryEntry
     {
         if (is_array($row) && isset($row['id'], $row['applied_at'])) {
-            $at = DateTimeImmutable::createFromFormat(DateTimeImmutable::ATOM, $row['applied_at'])
+            $at = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $row['applied_at'], new \DateTimeZone('UTC'))
                 ?: throw new RuntimeException(
                     "Migration storage table contains a corrupted timestamp for id={$row['id']}: {$row['applied_at']}",
                 );
