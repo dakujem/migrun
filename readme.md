@@ -518,3 +518,25 @@ final class TransactionalExecutor implements ExecutesMigrations
 }
 ```
 
+
+## Migrating between storage backends
+
+If you need to switch from one storage backend to another (e.g. from `MysqliStorage` to `PdoStorage`), use the existing storage API to transfer the history. Read all applied migrations from the old backend in reverse order (oldest first), then mark them applied in the new one:
+
+```php
+use Dakujem\Migrun\Storage\MysqliStorage;
+use Dakujem\Migrun\Storage\PdoStorage;
+
+$old = new MysqliStorage($mysqli);
+$new = new PdoStorage($pdo);
+
+$applied = iterator_to_array($old->getApplied()); // newest first
+$migrationOrder = array_reverse($applied);
+foreach ($migrationOrder as $entry) {
+    $file = new MigrationFile(path: '', id: $entry->id()); // the path is irrelevant in storage
+    $new->markApplied($file, $entry->at());
+}
+```
+
+This works for any combination of backends. Once you have verified the new table looks correct, drop the old one and update your configuration.
+
