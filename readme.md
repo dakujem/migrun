@@ -275,6 +275,8 @@ match ($command) {
         echo $header . PHP_EOL;
         echo str_repeat('-', strlen($header)) . PHP_EOL;
 
+        $up = $down = 0;
+        $missingSince = null;
         foreach ($entries as $entry) {
             echo sprintf(
                 "%-{$idWidth}s  %-7s  %s",
@@ -286,7 +288,18 @@ match ($command) {
                 },
                 $entry->appliedAt?->format('Y-m-d H:i:s') ?? '-',
             ) . PHP_EOL;
+            $up += MigrationState::Applied === $entry->state ? 1 : 0;
+            $down += MigrationState::Pending === $entry->state ? 1 : 0;
+            if (MigrationState::Missing === $entry->state) {
+                $missingSince = $entry->appliedAt;
+            }
         }
+
+        echo str_repeat('-', strlen($header)) . PHP_EOL;
+        if ($missingSince) {
+            echo "WARNING! Some migration files missing since {$missingSince->format('Y-m-d H:i:s')}." . PHP_EOL;
+        }
+        echo "Total: {$up} up, {$down} down" . PHP_EOL;
     })(),
 
     default => (function () use ($command) {
