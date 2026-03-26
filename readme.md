@@ -219,7 +219,6 @@ Migrun ships no CLI command of its own — keeping it decoupled from any console
 Create `bin/migrate.php` (or wherever suits your project):
 
 ```php
-#!/usr/bin/env php
 <?php
 
 require __DIR__ . '/../vendor/autoload.php';
