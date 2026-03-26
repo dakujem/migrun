@@ -343,8 +343,10 @@ If your project already uses Symfony Console:
 ```php
 <?php
 
+use Dakujem\Migrun\MigrationState;
 use Dakujem\Migrun\Orchestrator;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
@@ -355,18 +357,90 @@ final class MigrateCommand extends Command
         parent::__construct('db:migrate');
     }
 
+    protected function configure(): void
+    {
+        $this->addArgument('command', InputArgument::OPTIONAL, 'run | rollback | status', 'run');
+        $this->addArgument('steps', InputArgument::OPTIONAL, 'Number of migrations to roll back', 1);
+    }
+
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        return match ($input->getArgument('command')) {
+            'run' => $this->runMigrations($output),
+            'rollback' => $this->rollback($output, (int) $input->getArgument('steps')),
+            'status' => $this->status($output),
+            default => (function () use ($input, $output) {
+                $output->writeln("<error>Unknown command: {$input->getArgument('command')}</error>");
+                return Command::FAILURE;
+            })(),
+        };
+    }
+
+    private function runMigrations(OutputInterface $output): int
+    {
         $executed = $this->runner->run();
-        foreach ($executed as $m) {
-            $output->writeln("Ran: {$m->id()}");
+        if (empty($executed)) {
+            $output->writeln('Nothing to run.');
         }
+        foreach ($executed as $m) {
+            $output->writeln("Migrated: {$m->id()}");
+        }
+        return Command::SUCCESS;
+    }
+
+    private function rollback(OutputInterface $output, int $steps): int
+    {
+        $reverted = $this->runner->rollback($steps);
+        foreach ($reverted as $m) {
+            $output->writeln("Reverted: {$m->id()}");
+        }
+        return Command::SUCCESS;
+    }
+
+    private function status(OutputInterface $output): int
+    {
+        $entries = array_filter(
+            iterator_to_array($this->runner->status()),
+            fn($e) => $e->state !== MigrationState::Missing,
+        );
+
+        if (empty($entries)) {
+            $output->writeln('No migrations found.');
+            return Command::SUCCESS;
+        }
+
+        $idWidth = max(array_map(fn($e) => strlen($e->id), $entries));
+        $idWidth = max($idWidth, 2);
+
+        $output->writeln(sprintf("%-{$idWidth}s  %-7s  %s", 'ID', 'Status', 'Applied at'));
+        $output->writeln(str_repeat('-', $idWidth + 22));
+
+        foreach ($entries as $entry) {
+            $output->writeln(sprintf(
+                "%-{$idWidth}s  %-7s  %s",
+                $entry->id,
+                match ($entry->state) {
+                    MigrationState::Applied => 'up',
+                    MigrationState::Pending => 'down',
+                    MigrationState::Missing => 'MISSING',
+                },
+                $entry->appliedAt?->format('Y-m-d H:i:s') ?? '-',
+            ));
+        }
+
         return Command::SUCCESS;
     }
 }
 ```
 
-Wire it the same way as any other command in your framework.
+Wire it the same way as any other command in your framework:
+
+```bash
+php bin/console db:migrate
+php bin/console db:migrate rollback
+php bin/console db:migrate rollback 3
+php bin/console db:migrate status
+```
 
 
 ## Extending
