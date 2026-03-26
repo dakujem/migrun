@@ -21,7 +21,7 @@ use RuntimeException;
  *
  * Table schema (created automatically):
  *   id         VARCHAR(255) PRIMARY KEY  — stable migration identifier
- *   applied_at VARCHAR(32)  NOT NULL     — ISO 8601 timestamp of when it was run
+ *   applied_at VARCHAR(32)  NOT NULL     — UTC ISO 8601 timestamp of when it was run
  *
  * The table name must be a plain identifier: letters, digits, and underscores
  * only, starting with a letter or underscore. This keeps SQL portable across
@@ -97,7 +97,7 @@ final class PdoStorage implements TracksMigrations
         );
         if ($stmt === false || !$stmt->execute([
                 $migration->id(),
-                ($at ?? new DateTimeImmutable())->format(DateTimeImmutable::ATOM),
+                ($at ?? new DateTimeImmutable())->setTimezone(new \DateTimeZone('UTC'))->format(DateTimeImmutable::ATOM),
             ])) {
             throw new RuntimeException("Could not insert into migration storage table: {$this->table}");
         }
@@ -143,7 +143,7 @@ final class PdoStorage implements TracksMigrations
     /**
      * Deserialise one row from the database into a MigrationHistoryEntry.
      *
-     * Expected keys: "id" (string), "applied_at" (ISO 8601 string).
+     * Expected keys: "id" (string), "applied_at" (UTC ISO 8601 string).
      */
     private function rowToEntry(mixed $row): MigrationHistoryEntry
     {
