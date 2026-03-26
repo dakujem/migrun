@@ -631,17 +631,41 @@ final class TransactionalExecutor implements ExecutesMigrations
 ```
 
 
+### Seeders
+
+Because an `Orchestrator` is just a directory + storage + invoker, you can run a second one for database seeders with no extra infrastructure:
+
+```php
+$migrations = (new MigrunBuilder())
+    ->directory(__DIR__ . '/migrations')
+    ->pdoStorage($pdo)                            // table: migrun_migrations
+    ->container($container)
+    ->build();
+
+$seeders = (new MigrunBuilder())
+    ->directory(__DIR__ . '/seeds')
+    ->pdoStorage($pdo, table: 'migrun_seeds')     // separate table, same database
+    ->container($container)
+    ->build();
+
+$migrations->run();
+$seeders->run();
+```
+
+Seeds are tracked independently of migrations — running one never affects the other's history.
+
+
 ## Migrating between storage backends
 
-If you need to switch from one storage backend to another (e.g. from `MysqliStorage` to `PdoStorage`),
-use the existing storage API to transfer the history.
+If you need to switch storage backends (e.g. from the default `JsonFileStorage` to `PdoStorage`),
+use the storage API to transfer the history.
 Read all applied migrations from the old backend in reverse order (oldest first), then mark them applied in the new one:
 
 ```php
-use Dakujem\Migrun\Storage\MysqliStorage;
+use Dakujem\Migrun\Storage\JsonFileStorage;
 use Dakujem\Migrun\Storage\PdoStorage;
 
-$old = new MysqliStorage($mysqli);
+$old = new JsonFileStorage(__DIR__ . '/migrations/.migrun/migrun.json');
 $new = new PdoStorage($pdo);
 
 $applied = $old->getApplied(); //   newest first
@@ -654,4 +678,7 @@ foreach ($migrationOrder as $entry) {
 ```
 
 This works for any combination of backends.
+
+> Switching between `PdoStorage` and `MysqliStorage` requires no data migration — both adapters use the same table schema (`id`, `applied_at`).
+> Point the new adapter at the existing table and it works immediately.
 
