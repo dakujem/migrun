@@ -16,7 +16,7 @@ class InvalidMigrationException extends RuntimeException
     {
         $type = get_debug_type($returned);
         parent::__construct(
-            "Migration file \"{$migration->id()}\" must return a callable or an instance of MigrationInterface, got {$type}.",
+            "Migration file \"{$migration->id()}\" must return a callable or an instance of Migration, got {$type}.",
         );
     }
 }
