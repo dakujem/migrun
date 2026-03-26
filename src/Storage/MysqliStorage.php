@@ -131,8 +131,8 @@ final class MysqliStorage implements TracksMigrations
 
         $ok = $this->mysqli->query(
             "CREATE TABLE IF NOT EXISTS `{$this->table}` (
-                id         VARCHAR(255) NOT NULL,
-                applied_at VARCHAR(32)  NOT NULL,
+                id         VARCHAR(255) NOT NULL COMMENT 'stable migration identifier',
+                applied_at VARCHAR(32)  NOT NULL COMMENT 'UTC ISO 8601 timestamp of application',
                 PRIMARY KEY (id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         );
