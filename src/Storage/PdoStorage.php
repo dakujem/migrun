@@ -7,6 +7,7 @@ namespace Dakujem\Migrun\Storage;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\TracksMigrations;
 use DateTimeImmutable;
+use DateTimeInterface;
 use InvalidArgumentException;
 use PDO;
 use RuntimeException;
@@ -96,7 +97,7 @@ final class PdoStorage implements TracksMigrations
         );
         if ($stmt === false || !$stmt->execute([
                 $id,
-                ($at ?? new DateTimeImmutable())->setTimezone(new \DateTimeZone('UTC'))->format(DateTimeImmutable::ATOM),
+                ($at ?? new DateTimeImmutable())->setTimezone(new \DateTimeZone('UTC'))->format(DateTimeInterface::ATOM),
             ])) {
             throw new RuntimeException("Could not insert into migration storage table: {$this->table}");
         }
@@ -147,7 +148,7 @@ final class PdoStorage implements TracksMigrations
     private function rowToEntry(mixed $row): MigrationHistoryEntry
     {
         if (is_array($row) && isset($row['id'], $row['applied_at'])) {
-            $at = DateTimeImmutable::createFromFormat(DateTimeImmutable::ATOM, $row['applied_at'])
+            $at = DateTimeImmutable::createFromFormat(DateTimeInterface::ATOM, $row['applied_at'])
                 ?: throw new RuntimeException(
                     "Migration storage table contains a corrupted timestamp for id={$row['id']}: {$row['applied_at']}",
                 );

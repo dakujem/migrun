@@ -7,6 +7,7 @@ namespace Dakujem\Migrun\Storage;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\TracksMigrations;
 use DateTimeImmutable;
+use DateTimeInterface;
 use InvalidArgumentException;
 use mysqli;
 use RuntimeException;
@@ -20,7 +21,7 @@ use RuntimeException;
  *
  * Table schema (created automatically):
  *   id         VARCHAR(255) PRIMARY KEY  — stable migration identifier
- *   at         TIMESTAMP    NOT NULL COMMENT 'UTC timestamp' — datetime of when it was run
+ *   applied_at VARCHAR(32)  NOT NULL     — UTC ISO 8601 timestamp of when it was run
  *
  * The table name must be a plain identifier: letters, digits, and underscores
  * only, starting with a letter or underscore. Backtick quoting is used, which
@@ -52,7 +53,7 @@ final class MysqliStorage implements TracksMigrations
         $this->ensureTable();
 
         $result = $this->mysqli->query(
-            "SELECT id, at FROM `{$this->table}` ORDER BY at DESC, id DESC",
+            "SELECT id, applied_at FROM `{$this->table}` ORDER BY applied_at DESC, id DESC",
         );
         if ($result === false) {
             throw new RuntimeException("Could not query migration storage table: {$this->table}");
@@ -93,11 +94,11 @@ final class MysqliStorage implements TracksMigrations
 
         $escapedId = $this->mysqli->real_escape_string($id);
         $appliedAt = $this->mysqli->real_escape_string(
-            ($at ?? new DateTimeImmutable())->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
+            ($at ?? new DateTimeImmutable())->setTimezone(new \DateTimeZone('UTC'))->format(DateTimeInterface::ATOM),
         );
 
         $ok = $this->mysqli->query(
-            "INSERT INTO `{$this->table}` (id, at) VALUES ('{$escapedId}', '{$appliedAt}')",
+            "INSERT INTO `{$this->table}` (id, applied_at) VALUES ('{$escapedId}', '{$appliedAt}')",
         );
         if ($ok === false) {
             throw new RuntimeException("Could not insert into migration storage table: {$this->table}");
@@ -131,7 +132,7 @@ final class MysqliStorage implements TracksMigrations
         $ok = $this->mysqli->query(
             "CREATE TABLE IF NOT EXISTS `{$this->table}` (
                 id         VARCHAR(255) NOT NULL,
-                at         TIMESTAMP    NOT NULL COMMENT 'UTC timestamp',
+                applied_at VARCHAR(32)  NOT NULL,
                 PRIMARY KEY (id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         );
@@ -145,14 +146,14 @@ final class MysqliStorage implements TracksMigrations
     /**
      * Deserialise one row from the database into a MigrationHistoryEntry.
      *
-     * Expected keys: "id" (string), "at" (UTC datetime string 'Y-m-d H:i:s').
+     * Expected keys: "id" (string), "applied_at" (UTC ISO 8601 string).
      */
     private function rowToEntry(mixed $row): MigrationHistoryEntry
     {
-        if (is_array($row) && isset($row['id'], $row['at'])) {
-            $at = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $row['at'], new \DateTimeZone('UTC'))
+        if (is_array($row) && isset($row['id'], $row['applied_at'])) {
+            $at = DateTimeImmutable::createFromFormat(DateTimeInterface::ATOM, $row['applied_at'])
                 ?: throw new RuntimeException(
-                    "Migration storage table contains a corrupted timestamp for id={$row['id']}: {$row['at']}",
+                    "Migration storage table contains a corrupted timestamp for id={$row['id']}: {$row['applied_at']}",
                 );
             return new MigrationHistoryEntry(
                 id: $row['id'],
