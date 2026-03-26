@@ -10,6 +10,7 @@ use Dakujem\Migrun\ExecutesMigrations;
 use Dakujem\Migrun\DiscoversMigrations;
 use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
+use Dakujem\Migrun\MigrationState;
 use Dakujem\Migrun\Orchestrator;
 use Dakujem\Migrun\TracksMigrations;
 use PHPUnit\Framework\TestCase;
@@ -25,12 +26,14 @@ final class SpyStorage implements TracksMigrations
     public array $markedReverted = [];
 
     /**
-     * @param string[] $applied     The windowed list of IDs returned by getApplied().
-     * @param string[] $fullHistory Full history for isApplied(); if empty defaults to $applied.
+     * @param string[]                         $applied     The windowed list of IDs returned by getApplied().
+     * @param string[]                         $fullHistory Full history for isApplied(); if empty defaults to $applied.
+     * @param array<string,\DateTimeInterface> $timestamps  Optional per-ID timestamps for getApplied().
      */
     public function __construct(
         array $applied = [],
         private readonly array $fullHistory = [],
+        private readonly array $timestamps = [],
     ) {
         $this->applied = $applied;
     }
@@ -43,7 +46,10 @@ final class SpyStorage implements TracksMigrations
     public function getApplied(): iterable
     {
         return array_map(
-            fn(string $id) => new MigrationHistoryEntry(id: $id, at: new \DateTimeImmutable()),
+            fn(string $id) => new MigrationHistoryEntry(
+                id: $id,
+                at: $this->timestamps[$id] ?? new \DateTimeImmutable(),
+            ),
             array_reverse($this->applied),
         );
     }
@@ -54,7 +60,7 @@ final class SpyStorage implements TracksMigrations
         return in_array($id, $history, strict: true);
     }
 
-    public function markApplied(string $id, ?\DateTimeImmutable $at = null): void
+    public function markApplied(string $id, ?\DateTimeInterface $at = null): void
     {
         $this->applied[] = $id;
         $this->markedApplied[] = $id;
@@ -263,5 +269,115 @@ final class RunnerTest extends TestCase
         // Neither migration should be re-run
         self::assertSame([], $executed);
         self::assertSame([], $executor->executed);
+    }
+
+    // -------------------------------------------------------------------------
+    // status()
+    // -------------------------------------------------------------------------
+
+    public function testStatusAllPending(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+        $m2 = $this->migration('20240115_090000_beta');
+        $m3 = $this->migration('20240120_080000_gamma');
+
+        // No history at all
+        $storage  = new SpyStorage([]);
+        $finder   = $this->stubFinder([$m1, $m2, $m3]);
+        $executor = new SpyExecutor();
+
+        $runner  = new Orchestrator($storage, $finder, $executor);
+        $entries = iterator_to_array($runner->status());
+
+        self::assertCount(3, $entries);
+
+        // Ordered ascending by ID
+        self::assertSame($m1->id(), $entries[0]->id);
+        self::assertSame($m2->id(), $entries[1]->id);
+        self::assertSame($m3->id(), $entries[2]->id);
+
+        foreach ($entries as $entry) {
+            self::assertSame(MigrationState::Pending, $entry->state);
+            self::assertNull($entry->appliedAt);
+            self::assertNotNull($entry->path);
+        }
+    }
+
+    public function testStatusAllApplied(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+        $m2 = $this->migration('20240115_090000_beta');
+
+        $at1 = new \DateTimeImmutable('2024-01-01 12:05:00');
+        $at2 = new \DateTimeImmutable('2024-01-15 09:10:00');
+
+        $storage = new SpyStorage(
+            applied: [$m1->id(), $m2->id()],
+            timestamps: [$m1->id() => $at1, $m2->id() => $at2],
+        );
+
+        $finder   = $this->stubFinder([$m1, $m2]);
+        $executor = new SpyExecutor();
+
+        $runner  = new Orchestrator($storage, $finder, $executor);
+        $entries = iterator_to_array($runner->status());
+
+        self::assertCount(2, $entries);
+
+        self::assertSame($m1->id(), $entries[0]->id);
+        self::assertSame(MigrationState::Applied, $entries[0]->state);
+        self::assertSame($at1->getTimestamp(), $entries[0]->appliedAt->getTimestamp());
+        self::assertSame("/migrations/{$m1->id()}.php", $entries[0]->path);
+
+        self::assertSame($m2->id(), $entries[1]->id);
+        self::assertSame(MigrationState::Applied, $entries[1]->state);
+        self::assertSame($at2->getTimestamp(), $entries[1]->appliedAt->getTimestamp());
+        self::assertSame("/migrations/{$m2->id()}.php", $entries[1]->path);
+    }
+
+    public function testStatusMixed(): void
+    {
+        // Scenario:
+        //   alpha  — applied (in history + on disk)
+        //   beta   — pending (on disk only)
+        //   gamma  — missing (in history only, file gone)
+        //   delta  — applied (in history + on disk)
+        $alpha = $this->migration('20240101_alpha');
+        $beta  = $this->migration('20240115_beta');
+        $delta = $this->migration('20240130_delta');
+
+        // gamma is in history but NOT in finder results
+        $gammaId = '20240120_gamma';
+
+        $storage  = new SpyStorage([$alpha->id(), $gammaId, $delta->id()]);
+        $finder   = $this->stubFinder([$alpha, $beta, $delta]); // gamma missing from disk
+        $executor = new SpyExecutor();
+
+        $runner  = new Orchestrator($storage, $finder, $executor);
+        $entries = iterator_to_array($runner->status());
+
+        self::assertCount(4, $entries);
+
+        // IDs sorted ascending: alpha, beta, delta, gamma
+        // Wait — sort is lexicographic: '20240101_alpha' < '20240115_beta' < '20240120_gamma' < '20240130_delta'
+        self::assertSame($alpha->id(), $entries[0]->id);
+        self::assertSame(MigrationState::Applied, $entries[0]->state);
+        self::assertNotNull($entries[0]->appliedAt);
+        self::assertNotNull($entries[0]->path);
+
+        self::assertSame($beta->id(), $entries[1]->id);
+        self::assertSame(MigrationState::Pending, $entries[1]->state);
+        self::assertNull($entries[1]->appliedAt);
+        self::assertNotNull($entries[1]->path);
+
+        self::assertSame($gammaId, $entries[2]->id);
+        self::assertSame(MigrationState::Missing, $entries[2]->state);
+        self::assertNotNull($entries[2]->appliedAt);
+        self::assertNull($entries[2]->path);
+
+        self::assertSame($delta->id(), $entries[3]->id);
+        self::assertSame(MigrationState::Applied, $entries[3]->state);
+        self::assertNotNull($entries[3]->appliedAt);
+        self::assertNotNull($entries[3]->path);
     }
 }

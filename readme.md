@@ -223,6 +223,7 @@ Create `bin/migrate.php` (or wherever suits your project):
 
 require __DIR__ . '/../vendor/autoload.php';
 
+use Dakujem\Migrun\MigrationState;
 use Dakujem\Migrun\MigrunBuilder;
 
 $container = require __DIR__ . '/../bootstrap/container.php';
@@ -254,9 +255,46 @@ match ($command) {
         }
     })(),
 
+    'status' => (function () use ($orchestrator) {
+        $entries = array_filter(
+            iterator_to_array($orchestrator->status()),
+            fn($e) => $e->state !== MigrationState::Missing,
+        );
+
+        if (empty($entries)) {
+            echo "No migrations found." . PHP_EOL;
+            return;
+        }
+
+        $idWidth = max(array_map(fn($e) => strlen($e->id), $entries));
+        $idWidth = max($idWidth, 2); // minimum column width
+
+        $header = sprintf(
+            "%-{$idWidth}s  %-7s  %s",
+            'ID',
+            'Status',
+            'Applied at',
+        );
+        echo $header . PHP_EOL;
+        echo str_repeat('-', strlen($header)) . PHP_EOL;
+
+        foreach ($entries as $entry) {
+            echo sprintf(
+                "%-{$idWidth}s  %-7s  %s",
+                $entry->id,
+                match ($entry->state) {
+                    MigrationState::Applied => 'applied',
+                    MigrationState::Pending => 'pending',
+                    MigrationState::Missing => 'missing',
+                },
+                $entry->appliedAt?->format('Y-m-d H:i:s') ?? '-',
+            ) . PHP_EOL;
+        }
+    })(),
+
     default => (function () use ($command) {
         echo "Unknown command: {$command}" . PHP_EOL;
-        echo "Usage: migrate.php [run|rollback [steps]]" . PHP_EOL;
+        echo "Usage: migrate.php [run|rollback [steps]|status]" . PHP_EOL;
         exit(1);
     })(),
 };
@@ -268,6 +306,7 @@ Make it executable and run:
 php bin/migrate.php run
 php bin/migrate.php rollback
 php bin/migrate.php rollback 3
+php bin/migrate.php status
 ```
 
 
@@ -278,8 +317,9 @@ Add the commands to the `scripts` section of your `composer.json`:
 ```json
 {
     "scripts": {
-        "migrate:up":   "@php bin/migrate.php run",
-        "migrate:down": "@php bin/migrate.php rollback"
+        "migrate:up":     "@php bin/migrate.php run",
+        "migrate:down":   "@php bin/migrate.php rollback",
+        "migrate:status": "@php bin/migrate.php status"
     }
 }
 ```
@@ -289,6 +329,7 @@ Then run:
 ```bash
 composer migrate:up
 composer migrate:down
+composer migrate:status
 ```
 
 Pass extra arguments with `--`:

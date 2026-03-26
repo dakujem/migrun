@@ -20,6 +20,15 @@ use Dakujem\Migrun\Exception\MigrationNotFoundException;
  *     1. Ask storage for applied migrations (most-recent-first order).
  *     2. Ask finder for all available migrations.
  *     3. For each of the last $steps applied migrations, execute Down and remove from storage.
+ *
+ *   status():
+ *     1. Collect all history entries from storage (keyed by ID).
+ *     2. Collect all migration files from finder (keyed by ID).
+ *     3. Merge both sets, sort ascending by ID.
+ *     4. Yield one MigrationStatusEntry per ID:
+ *        - present in both  → Applied  (appliedAt set, path set)
+ *        - file only        → Pending  (appliedAt null, path set)
+ *        - history only     → Missing  (appliedAt set, path null)
  */
 final readonly class Orchestrator
 {
@@ -81,5 +90,53 @@ final readonly class Orchestrator
         }
 
         return $reverted;
+    }
+
+    /**
+     * Return the status of all known migrations, ordered ascending by ID.
+     *
+     * Each entry carries:
+     *   - Applied  — recorded in history and the file is present on disk
+     *   - Pending  — file is present on disk but has not been run yet
+     *   - Missing  — recorded in history but the file no longer exists on disk
+     *
+     * @return iterable<MigrationStatusEntry>
+     */
+    public function status(): iterable
+    {
+        // Collect history: id => MigrationHistoryEntry
+        $history = [];
+        foreach ($this->storage->getApplied() as $entry) {
+            $history[$entry->id()] = $entry;
+        }
+
+        // Collect files: id => MigrationFile
+        $files = [];
+        foreach ($this->finder->list() as $migration) {
+            $files[$migration->id()] = $migration;
+        }
+
+        // Merge all known IDs and sort ascending
+        $ids = array_keys($history + $files);
+        sort($ids);
+
+        $entries = [];
+        foreach ($ids as $id) {
+            $inHistory = isset($history[$id]);
+            $onDisk    = isset($files[$id]);
+
+            $entries[] = new MigrationStatusEntry(
+                id:        $id,
+                state:     match (true) {
+                    $inHistory && $onDisk => MigrationState::Applied,
+                    $onDisk              => MigrationState::Pending,
+                    default              => MigrationState::Missing,
+                },
+                appliedAt: $inHistory ? $history[$id]->at() : null,
+                path:      $onDisk    ? $files[$id]->path() : null,
+            );
+        }
+
+        return $entries;
     }
 }
