@@ -9,6 +9,7 @@ use Dakujem\Migrun\TracksMigrations;
 use DateTimeImmutable;
 use DateTimeInterface;
 use InvalidArgumentException;
+use LengthException;
 use mysqli;
 use RuntimeException;
 
@@ -23,19 +24,24 @@ use RuntimeException;
  *   id         VARCHAR(255) PRIMARY KEY  — stable migration identifier
  *   applied_at VARCHAR(32)  NOT NULL     — UTC ISO 8601 timestamp of when it was run
  *
+ * Migration IDs longer than MaximumIdLength characters are rejected
+ * both on write and on read to prevent silent truncation
+ * on databases with lax configuration.
+ *
  * The table name must be a plain identifier: letters, digits, and underscores
  * only, starting with a letter or underscore. Backtick quoting is used, which
  * is correct and unambiguous for MySQL/MariaDB.
  */
 final class MysqliStorage implements TracksMigrations
 {
-    public const DEFAULT_TABLE = 'migrun_migrations';
+    public const DefaultTableName = 'migrun_migrations';
+    public const MaximumIdLength = 255;
 
     private bool $tableEnsured = false;
 
     public function __construct(
         private readonly mysqli $mysqli,
-        private readonly string $table = self::DEFAULT_TABLE,
+        private readonly string $table = self::DefaultTableName,
     ) {
         if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $table)) {
             throw new InvalidArgumentException(
@@ -69,6 +75,7 @@ final class MysqliStorage implements TracksMigrations
 
     public function isApplied(string $id): bool
     {
+        $this->assertIdLength($id);
         $this->ensureTable();
 
         $id = $this->mysqli->real_escape_string($id);
@@ -86,6 +93,7 @@ final class MysqliStorage implements TracksMigrations
 
     public function markApplied(string $id, ?DateTimeInterface $at = null): void
     {
+        $this->assertIdLength($id);
         $this->ensureTable();
 
         if ($this->isApplied($id)) {
@@ -107,6 +115,7 @@ final class MysqliStorage implements TracksMigrations
 
     public function markReverted(string $id): void
     {
+        $this->assertIdLength($id);
         $this->ensureTable();
 
         $id = $this->mysqli->real_escape_string($id);
@@ -151,6 +160,7 @@ final class MysqliStorage implements TracksMigrations
     private function rowToEntry(mixed $row): MigrationHistoryEntry
     {
         if (is_array($row) && isset($row['id'], $row['applied_at'])) {
+            $this->assertIdLength($row['id']);
             $at = DateTimeImmutable::createFromFormat(DateTimeInterface::ATOM, $row['applied_at'])
                 ?: throw new RuntimeException(
                     "Migration storage table contains a corrupted timestamp for id={$row['id']}: {$row['applied_at']}",
@@ -162,5 +172,14 @@ final class MysqliStorage implements TracksMigrations
         }
 
         throw new RuntimeException('Migration storage table returned an unexpected row structure.');
+    }
+
+    private function assertIdLength(string $id): void
+    {
+        if (strlen($id) > self::MaximumIdLength) {
+            throw new LengthException(
+                "Migration ID is too long for storage (max " . self::MaximumIdLength . " bytes, got " . strlen($id) . "): \"{$id}\"",
+            );
+        }
     }
 }

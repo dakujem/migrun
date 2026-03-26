@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Dakujem\Migrun\Tests;
 
 use DateTimeImmutable;
+use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\Storage\MysqliStorage;
 use InvalidArgumentException;
+use LengthException;
 use mysqli;
 use PHPUnit\Framework\TestCase;
 
@@ -201,5 +203,35 @@ final class MysqliStorageTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
         new MysqliStorage($this->conn, 'bad-name!');
+    }
+
+    // -------------------------------------------------------------------------
+    // ID length guard
+    // -------------------------------------------------------------------------
+
+    public function testMarkAppliedThrowsWhenIdTooLong(): void
+    {
+        $this->expectException(LengthException::class);
+        $this->storage()->markApplied(str_repeat('a', MysqliStorage::MaximumIdLength + 1));
+    }
+
+    public function testIsAppliedThrowsWhenIdTooLong(): void
+    {
+        $this->expectException(LengthException::class);
+        $this->storage()->isApplied(str_repeat('a', MysqliStorage::MaximumIdLength + 1));
+    }
+
+    public function testMarkRevertedThrowsWhenIdTooLong(): void
+    {
+        $this->expectException(LengthException::class);
+        $this->storage()->markReverted(str_repeat('a', MysqliStorage::MaximumIdLength + 1));
+    }
+
+    public function testMarkAppliedAcceptsIdAtExactMaxLength(): void
+    {
+        $storage = $this->storage();
+        $id = str_repeat('a', MysqliStorage::MaximumIdLength);
+        $storage->markApplied($id);
+        self::assertTrue($storage->isApplied($id));
     }
 }

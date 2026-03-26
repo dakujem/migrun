@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\Storage\PdoStorage;
 use InvalidArgumentException;
+use LengthException;
 use PDO;
 use PHPUnit\Framework\TestCase;
 
@@ -162,5 +163,34 @@ final class PdoStorageTest extends TestCase
         $this->storage->markReverted('20240101_120000_nonexistent');
 
         self::assertSame([], $this->appliedIds($this->storage));
+    }
+
+    // -------------------------------------------------------------------------
+    // ID length guard
+    // -------------------------------------------------------------------------
+
+    public function testMarkAppliedThrowsWhenIdTooLong(): void
+    {
+        $this->expectException(LengthException::class);
+        $this->storage->markApplied(str_repeat('a', PdoStorage::MaximumIdLength + 1));
+    }
+
+    public function testIsAppliedThrowsWhenIdTooLong(): void
+    {
+        $this->expectException(LengthException::class);
+        $this->storage->isApplied(str_repeat('a', PdoStorage::MaximumIdLength + 1));
+    }
+
+    public function testMarkRevertedThrowsWhenIdTooLong(): void
+    {
+        $this->expectException(LengthException::class);
+        $this->storage->markReverted(str_repeat('a', PdoStorage::MaximumIdLength + 1));
+    }
+
+    public function testMarkAppliedAcceptsIdAtExactMaxLength(): void
+    {
+        $id = str_repeat('a', PdoStorage::MaximumIdLength);
+        $this->storage->markApplied($id);
+        self::assertTrue($this->storage->isApplied($id));
     }
 }

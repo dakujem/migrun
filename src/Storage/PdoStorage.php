@@ -9,6 +9,7 @@ use Dakujem\Migrun\TracksMigrations;
 use DateTimeImmutable;
 use DateTimeInterface;
 use InvalidArgumentException;
+use LengthException;
 use PDO;
 use RuntimeException;
 
@@ -23,6 +24,10 @@ use RuntimeException;
  *   id         VARCHAR(255) PRIMARY KEY  — stable migration identifier
  *   applied_at VARCHAR(32)  NOT NULL     — UTC ISO 8601 timestamp of when it was run
  *
+ *  Migration IDs longer than MaximumIdLength characters are rejected
+ *  both on write and on read to prevent silent truncation
+ *  on databases with lax configuration.
+ *
  * The table name must be a plain identifier: letters, digits, and underscores
  * only, starting with a letter or underscore. This keeps SQL portable across
  * MySQL, PostgreSQL, and SQLite without any dialect-specific quoting.
@@ -32,6 +37,7 @@ use RuntimeException;
 final class PdoStorage implements TracksMigrations
 {
     public const DefaultTableName = 'migrun_migrations';
+    public const MaximumIdLength = 255;
 
     private bool $tableEnsured = false;
 
@@ -70,6 +76,7 @@ final class PdoStorage implements TracksMigrations
 
     public function isApplied(string $id): bool
     {
+        $this->assertIdLength($id);
         $this->ensureTable();
 
         $stmt = $this->pdo->prepare(
@@ -84,6 +91,7 @@ final class PdoStorage implements TracksMigrations
 
     public function markApplied(string $id, ?DateTimeInterface $at = null): void
     {
+        $this->assertIdLength($id);
         $this->ensureTable();
 
         // Guard against duplicates: the primary key also enforces this at the
@@ -105,6 +113,7 @@ final class PdoStorage implements TracksMigrations
 
     public function markReverted(string $id): void
     {
+        $this->assertIdLength($id);
         $this->ensureTable();
 
         $stmt = $this->pdo->prepare(
@@ -148,6 +157,7 @@ final class PdoStorage implements TracksMigrations
     private function rowToEntry(mixed $row): MigrationHistoryEntry
     {
         if (is_array($row) && isset($row['id'], $row['applied_at'])) {
+            $this->assertIdLength($row['id']);
             $at = DateTimeImmutable::createFromFormat(DateTimeInterface::ATOM, $row['applied_at'])
                 ?: throw new RuntimeException(
                     "Migration storage table contains a corrupted timestamp for id={$row['id']}: {$row['applied_at']}",
@@ -159,5 +169,14 @@ final class PdoStorage implements TracksMigrations
         }
 
         throw new RuntimeException('Migration storage table returned an unexpected row structure.');
+    }
+
+    private function assertIdLength(string $id): void
+    {
+        if (strlen($id) > self::MaximumIdLength) {
+            throw new LengthException(
+                "Migration ID is too long for storage (max " . self::MaximumIdLength . " bytes, got " . strlen($id) . "): \"{$id}\"",
+            );
+        }
     }
 }
