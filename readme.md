@@ -256,10 +256,7 @@ match ($command) {
     })(),
 
     'status' => (function () use ($orchestrator) {
-        $entries = array_filter(
-            iterator_to_array($orchestrator->status()),
-            fn($e) => $e->state !== MigrationState::Missing,
-        );
+        $entries = $orchestrator->status();
 
         if (empty($entries)) {
             echo "No migrations found." . PHP_EOL;
@@ -271,9 +268,9 @@ match ($command) {
 
         $header = sprintf(
             "%-{$idWidth}s  %-7s  %s",
-            'ID',
+            'Migration ID',
             'Status',
-            'Applied at',
+            'Applied at (UTC)' . '   ',
         );
         echo $header . PHP_EOL;
         echo str_repeat('-', strlen($header)) . PHP_EOL;
@@ -283,9 +280,9 @@ match ($command) {
                 "%-{$idWidth}s  %-7s  %s",
                 $entry->id,
                 match ($entry->state) {
-                    MigrationState::Applied => 'applied',
-                    MigrationState::Pending => 'pending',
-                    MigrationState::Missing => 'missing',
+                    MigrationState::Applied => 'up',
+                    MigrationState::Pending => 'down',
+                    MigrationState::Missing => 'MISSING',
                 },
                 $entry->appliedAt?->format('Y-m-d H:i:s') ?? '-',
             ) . PHP_EOL;
