@@ -16,7 +16,7 @@ Migrun looks for migration files and makes sure each one has run exactly once.
 It is a lightweight, hackable tool to help you manage database changes consistently.
 It is intended to be incorporated into your existing project setup.
 
-Migrun does not:
+Migrun does **not**:
 - provide a migration framework
 - provide a query builder
 - provide a database abstraction layer or any sort of ORM
