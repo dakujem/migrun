@@ -42,7 +42,7 @@ final readonly class Orchestrator
     /**
      * Execute all pending migrations.
      *
-     * @return MigrationFile[] The migrations that were executed.
+     * @return MigrationRun[] The migrations that were executed.
      */
     public function run(): array
     {
@@ -53,9 +53,16 @@ final readonly class Orchestrator
             if ($this->storage->isApplied($migration->id())) {
                 continue;
             }
+
+            $start = microtime(true);
             $this->executor->execute($migration, Direction::Up);
+            $end = microtime(true);
+
             $this->storage->markApplied($migration->id());
-            $executed[] = $migration;
+            $executed[] = new MigrationRun(
+                $migration,
+                $end - $start,
+            );
         }
 
         return $executed;
@@ -64,7 +71,7 @@ final readonly class Orchestrator
     /**
      * Roll back the last $steps migrations.
      *
-     * @return MigrationFile[] The migrations that were rolled back.
+     * @return MigrationRun[] The migrations that were rolled back.
      * @throws MigrationNotFoundException if a recorded migration cannot be found on disk.
      */
     public function rollback(int $steps = 1): array
@@ -84,9 +91,16 @@ final readonly class Orchestrator
         $reverted = [];
         foreach ($targets as $entry) {
             $migration = $available[$entry->id()];
+
+            $start = microtime(true);
             $this->executor->execute($migration, Direction::Down);
+            $end = microtime(true);
+
             $this->storage->markReverted($migration->id());
-            $reverted[] = $migration;
+            $reverted[] = new MigrationRun(
+                $migration,
+                $end - $start,
+            );
         }
 
         return $reverted;
@@ -123,17 +137,17 @@ final readonly class Orchestrator
         $entries = [];
         foreach ($ids as $id) {
             $inHistory = isset($history[$id]);
-            $onDisk    = isset($files[$id]);
+            $onDisk = isset($files[$id]);
 
             $entries[] = new MigrationStatusEntry(
-                id:        $id,
-                state:     match (true) {
+                id: $id,
+                state: match (true) {
                     $inHistory && $onDisk => MigrationState::Applied,
-                    $onDisk              => MigrationState::Pending,
-                    default              => MigrationState::Missing,
+                    $onDisk => MigrationState::Pending,
+                    default => MigrationState::Missing,
                 },
                 appliedAt: $inHistory ? $history[$id]->at() : null,
-                path:      $onDisk    ? $files[$id]->path() : null,
+                path: $onDisk ? $files[$id]->path() : null,
             );
         }
 
