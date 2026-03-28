@@ -1,6 +1,6 @@
 # Migrun
 
-A lightweight, flexible migration runner for any stack.
+A lightweight, flexible migration runner for your PHP stack.
 
 Database migrations on your terms.  
 No framework lock-in. No config files. Any database.
@@ -10,14 +10,30 @@ No framework lock-in. No config files. Any database.
 >
 
 
+## What is Migrun?
+
+Migrun looks for migration files and makes sure each one has run exactly once.
+It is a lightweight, hackable tool to help you manage database changes consistently.
+It is intended to be incorporated into your existing project setup.
+
+Migrun does not:
+- provide a migration framework
+- provide a query builder
+- provide a database abstraction layer or any sort of ORM
+- enforce usage of a particular database connection type or library
+
+
 ## Migration file format
 
-Migrun imposes **no restrictions on filenames**. Any `.php` file placed in the configured directory is picked up as a migration.
+Migrun imposes **no restrictions on filenames**.
+By default, any `.php` file placed in the configured directory is picked up as a migration.
 
 
 ### Execution order
 
-The built-in `DirectoryFinder` sorts migrations lexicographically by their ID, which is the filename stem (the path relative to the migrations directory, without the `.php` extension). **The order in which migrations run is therefore determined entirely by the filename.**
+The built-in `DirectoryFinder` sorts migrations lexicographically by their ID,
+which is the filename stem (the path relative to the migrations directory, without the `.php` extension).
+**The order in which migrations run is therefore determined entirely by the filename.**
 
 
 ### Recommended naming convention
@@ -35,9 +51,12 @@ Examples:
 20240115_093000_add_email_index.php
 ```
 
-With this convention, lexicographic and chronological order coincide. Any other stable, monotonically increasing prefix (a sequential number, a date-only stamp, etc.) works just as well — pick whatever your team finds clearest.
+With this convention, lexicographic and chronological order coincide.
+Any other stable, monotonically increasing prefix (a sequential number, a date-only stamp, etc.)
+works just as well — pick whatever your team finds clearest.
 
-> The timestamp in the filename is purely for ordering. The history storage records the time the migration *ran*, not the time encoded in the filename.
+> The timestamp in the filename is purely for ordering.
+> The history storage records the time the migration *ran*, not the time encoded in the filename.
 
 
 ### Format A — callable (up only)
