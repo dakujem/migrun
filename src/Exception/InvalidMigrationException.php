@@ -8,7 +8,7 @@ use Dakujem\Migrun\MigrationFile;
 use RuntimeException;
 
 /**
- * Thrown when a migration file does not return a valid migration (callable or MigrationInterface).
+ * Thrown when a migration file does not return a valid migration.
  */
 class InvalidMigrationException extends RuntimeException
 {
@@ -16,7 +16,7 @@ class InvalidMigrationException extends RuntimeException
     {
         $type = get_debug_type($returned);
         parent::__construct(
-            "Migration file \"{$migration->id()}\" must return a callable or an instance of Migration, got {$type}.",
+            "Migration file \"{$migration->id()}\" must return a callable or an object with a public up() method, got {$type}.",
         );
     }
 }

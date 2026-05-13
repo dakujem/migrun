@@ -278,30 +278,85 @@ return new class implements ReversibleMigration {
         unlink($flag);
     }
 
-    public function testAcceptsCustomInvoker(): void
+    public function testExecutesDuckTypeUpOnly(): void
     {
-        $flag = $this->dir . '/custom_invoker.flag';
-
+        $flag = $this->dir . '/duck_up.flag';
         file_put_contents(
-            "{$this->dir}/20240101_120000_custom.php",
-            "<?php return function(string \$msg): void {
-                file_put_contents('" . addslashes($flag) . "', \$msg);
-            };",
+            "{$this->dir}/20240101_120000_duck_up.php",
+            "<?php
+return new class {
+    public function up(): void { file_put_contents('" . addslashes($flag) . "', 'up'); }
+};",
         );
 
-        // A custom invoker that supplies a hard-coded argument
-        $invoker = new class implements InvokesCallable {
-            public function invoke(callable $fn): mixed
-            {
-                return $fn('hello-from-custom-invoker');
-            }
-        };
-
-        $executor = new Executor($invoker);
-        $executor->execute($this->migrationFile('20240101_120000_custom.php'), Direction::Up);
+        $executor = new Executor($this->emptyInvoker());
+        $executor->execute($this->migrationFile('20240101_120000_duck_up.php'), Direction::Up);
 
         self::assertFileExists($flag);
-        self::assertSame('hello-from-custom-invoker', file_get_contents($flag));
+        self::assertSame('up', file_get_contents($flag));
+        unlink($flag);
+    }
+
+    public function testDuckTypeUpOnlyThrowsOnDown(): void
+    {
+        file_put_contents(
+            "{$this->dir}/20240101_120000_duck_up_nodown.php",
+            "<?php
+return new class {
+    public function up(): void {}
+};",
+        );
+
+        $executor = new Executor($this->emptyInvoker());
+
+        $this->expectException(NoRollbackException::class);
+        $executor->execute($this->migrationFile('20240101_120000_duck_up_nodown.php'), Direction::Down);
+    }
+
+    public function testExecutesDuckTypeUpAndDown(): void
+    {
+        $flag = $this->dir . '/duck_updown.flag';
+        file_put_contents(
+            "{$this->dir}/20240101_120000_duck_updown.php",
+            "<?php
+return new class {
+    public function up(): void { file_put_contents('" . addslashes($flag) . "', 'up'); }
+    public function down(): void { file_put_contents('" . addslashes($flag) . "', 'down'); }
+};",
+        );
+
+        $executor = new Executor($this->emptyInvoker());
+
+        $executor->execute($this->migrationFile('20240101_120000_duck_updown.php'), Direction::Up);
+        self::assertSame('up', file_get_contents($flag));
+
+        $executor->execute($this->migrationFile('20240101_120000_duck_updown.php'), Direction::Down);
+        self::assertSame('down', file_get_contents($flag));
+
+        unlink($flag);
+    }
+
+    public function testDuckTypeUpTakesPrecedenceOverInvoke(): void
+    {
+        $flag = $this->dir . '/duck_invoke.flag';
+        file_put_contents(
+            "{$this->dir}/20240101_120000_duck_invoke.php",
+            "<?php
+return new class {
+    public function up(): void { file_put_contents('" . addslashes($flag) . "', 'up'); }
+    public function down(): void { file_put_contents('" . addslashes($flag) . "', 'down'); }
+    public function __invoke(): void { file_put_contents('" . addslashes($flag) . "', 'invoke'); }
+};",
+        );
+
+        $executor = new Executor($this->emptyInvoker());
+
+        $executor->execute($this->migrationFile('20240101_120000_duck_invoke.php'), Direction::Up);
+        self::assertSame('up', file_get_contents($flag));
+
+        $executor->execute($this->migrationFile('20240101_120000_duck_invoke.php'), Direction::Down);
+        self::assertSame('down', file_get_contents($flag));
+
         unlink($flag);
     }
 
@@ -327,6 +382,33 @@ return new class implements ReversibleMigration {
         $invoker = new TrivialInvoker();
         $result = $invoker->invoke(fn() => 'hello');
         self::assertSame('hello', $result);
+    }
+
+    public function testAcceptsCustomInvoker(): void
+    {
+        $flag = $this->dir . '/custom_invoker.flag';
+
+        file_put_contents(
+            "{$this->dir}/20240101_120000_custom.php",
+            "<?php return function(string \$msg): void {
+                file_put_contents('" . addslashes($flag) . "', \$msg);
+            };",
+        );
+
+        // A custom invoker that supplies a hard-coded argument
+        $invoker = new class implements InvokesCallable {
+            public function invoke(callable $fn): mixed
+            {
+                return $fn('hello-from-custom-invoker');
+            }
+        };
+
+        $executor = new Executor($invoker);
+        $executor->execute($this->migrationFile('20240101_120000_custom.php'), Direction::Up);
+
+        self::assertFileExists($flag);
+        self::assertSame('hello-from-custom-invoker', file_get_contents($flag));
+        unlink($flag);
     }
 }
 

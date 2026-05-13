@@ -25,8 +25,11 @@ Migrun does **not**:
 
 ## Migration file format
 
-Migrun imposes **no restrictions on filenames**.
+Migrun imposes **no restrictions on filenames**.  
 By default, any `.php` file placed in the configured directory is picked up as a migration.
+
+Each migration MUST _return_ a callable class or closure.
+This is a distinction compared to other migration runners.
 
 
 ### Execution order
@@ -59,9 +62,55 @@ works just as well — pick whatever your team finds clearest.
 > The history storage records the time the migration *ran*, not the time encoded in the filename.
 
 
-### Format A — callable (up only)
+### Format A — anonymous class (up + down)
 
-The file returns a callable. Its typed parameters are autowired from the PSR-11 container by class name (when using `ContainerInvoker`).
+The file **returns** an anonymous class with `up()` and `down()` methods. No interface required.
+Typed parameters are autowired from the PSR-11 container by class name (when using `ContainerInvoker`).
+
+```php
+<?php
+// migrations/20240115_093000_add_email_index.php
+
+use PDO;
+
+return new class
+{
+    public function up(PDO $db): void
+    {
+        $db->exec('CREATE INDEX idx_users_email ON users (email)');
+    }
+
+    public function down(PDO $db): void
+    {
+        $db->exec('DROP INDEX idx_users_email');
+    }
+};
+```
+
+
+### Format B — anonymous class (up only)
+
+The file **returns** an anonymous class with an `up()` method only. Rollback is not supported.
+
+```php
+<?php
+// migrations/20240101_120000_create_users.php
+
+use PDO;
+
+return new class
+{
+    public function up(PDO $db): void
+    {
+        $db->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
+    }
+};
+```
+
+
+### Format C — callable (up only)
+
+The file **returns** a callable. Rollback is not supported.
 
 ```php
 <?php
@@ -74,10 +123,13 @@ return function (PDO $db): void {
 };
 ```
 
+> **Edge case:** if a returned object has both a public `up()` method and is itself callable (i.e. defines `__invoke`), `up()` takes precedence and `__invoke` is never used.
 
-### Format B — anonymous class (up + down)
 
-The file returns a `ReversibleMigration` instance to support rollback.
+### Format D — interface-based anonymous class
+
+For projects that prefer explicit contracts, the file may return an instance implementing `Migration` or `ReversibleMigration`.
+Behaviour is identical to returning a class defining either just the `up` method or both the `up` and `down` methods.
 
 ```php
 <?php
@@ -100,7 +152,8 @@ return new class implements ReversibleMigration
 };
 ```
 
-> `up()` and `down()` may declare typed parameters beyond the parameter-less interface signature. PHP's LSP rules require these to have default values, and the invoker will override the defaults with container-resolved instances automatically.
+> Methods `up()` and `down()` may declare typed parameters beyond the parameter-less interface signature.
+> PHP's LSP rules require these to have default values, but the invoker will override the defaults with container-resolved instances automatically.
 
 
 ## Quick setup
@@ -148,12 +201,16 @@ $orchestrator = (new MigrunBuilder())
 
 Storage defaults to `{migrations-dir}/.migrun/migrun.json` — no extra configuration needed. Migration files must accept no arguments (or have all defaults).
 
-> **Important:** The default JSON storage file tracks which migrations have already run. If it is committed to version control and then overwritten (e.g. reset to an earlier state or deleted), Migrun will re-run migrations that have already been applied. Add the file to `.gitignore` to prevent this:
+> **Important:** The default JSON storage file tracks which migrations have already run.
+> If it is committed to version control and then overwritten (e.g. reset to an earlier state or deleted),
+> Migrun will re-run migrations that have already been applied. Add the file to `.gitignore` to prevent this:
 > ```
 > # migrun storage
 > {migrations-dir}/.migrun/*
 > ```
-> This covers both the default JSON file and the default SQLite file, since both live under `.migrun/`. If you configure a custom storage path, gitignore that path instead. Using PDO storage in the same database avoids this concern entirely.
+> This covers both the default JSON file and the default SQLite file, since both live under `.migrun/`.
+> If you configure a custom storage path, gitignore that path instead.
+> Using PDO storage in the same database avoids this concern entirely.
 
 
 ### All builder options
@@ -633,7 +690,7 @@ $orchestrator = new Orchestrator(
 
 ### Custom executor
 
-Implement `ExecutesMigrations` to wrap each migration in a transaction, add logging, emit events, etc:
+Implement `ExecutesMigrations` to wrap each migration in a transaction, add logging, emit events, etc.:
 
 ```php
 use Dakujem\Migrun\Direction;
