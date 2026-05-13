@@ -168,4 +168,76 @@ final class FileStorageTest extends TestCase
             $applied[0]->at(),
         );
     }
+
+    // -------------------------------------------------------------------------
+    // Malformed row structure
+    // -------------------------------------------------------------------------
+
+    public function testThrowsOnRowMissingIdKey(): void
+    {
+        file_put_contents(
+            $this->storagePath,
+            json_encode([
+                ['at' => '2024-01-01T12:00:00+00:00'], // 'id' key missing
+            ]) . "\n",
+        );
+        $storage = new JsonFileStorage($this->storagePath);
+
+        $this->expectException(RuntimeException::class);
+        $storage->getApplied();
+    }
+
+    public function testThrowsOnRowMissingAtKey(): void
+    {
+        file_put_contents(
+            $this->storagePath,
+            json_encode([
+                ['id' => '20240101_test'], // 'at' key missing
+            ]) . "\n",
+        );
+        $storage = new JsonFileStorage($this->storagePath);
+
+        $this->expectException(RuntimeException::class);
+        $storage->getApplied();
+    }
+
+    // -------------------------------------------------------------------------
+    // markReverted on unknown id is a noop
+    // -------------------------------------------------------------------------
+
+    public function testMarkRevertedOnUnknownIdIsNoop(): void
+    {
+        $storage = new JsonFileStorage($this->storagePath);
+        $storage->markApplied('20240101_alpha');
+
+        // Should not throw or remove anything else.
+        $storage->markReverted('20240101_nonexistent');
+
+        self::assertSame(['20240101_alpha'], $this->appliedIds($storage));
+    }
+
+    // -------------------------------------------------------------------------
+    // Directory auto-creation on persist
+    // -------------------------------------------------------------------------
+
+    public function testCreatesParentDirectoryIfMissing(): void
+    {
+        $dir = sys_get_temp_dir() . '/migrun_test_dir_' . uniqid();
+        $path = $dir . '/history.json';
+
+        try {
+            $storage = new JsonFileStorage($path);
+            $storage->markApplied('20240101_init');
+
+            self::assertDirectoryExists($dir);
+            self::assertFileExists($path);
+        } finally {
+            if (file_exists($path)) {
+                unlink($path);
+            }
+            if (is_dir($dir)) {
+                rmdir($dir);
+            }
+        }
+    }
 }

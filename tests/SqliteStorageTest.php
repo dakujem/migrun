@@ -7,6 +7,7 @@ namespace Dakujem\Migrun\Tests;
 use DateTimeImmutable;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\Storage\SqliteStorage;
+use org\bovigo\vfs\vfsStream;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -143,5 +144,19 @@ final class SqliteStorageTest extends TestCase
         // Open a second instance pointing to the same file.
         $storage2 = new SqliteStorage($this->dbPath);
         self::assertTrue($storage2->isApplied('20240101_120000_create_users'));
+    }
+
+    // -------------------------------------------------------------------------
+    // mkdir failure
+    // -------------------------------------------------------------------------
+
+    public function testThrowsWhenParentDirectoryCannotBeCreated(): void
+    {
+        $root = vfsStream::setup('migrun_sqlite', 0555); // read-only root
+        $path = vfsStream::url('migrun_sqlite/subdir/history.sqlite');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Could not create directory/');
+        new SqliteStorage($path);
     }
 }

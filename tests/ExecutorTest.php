@@ -10,6 +10,7 @@ use Dakujem\Migrun\Exception\NoRollbackException;
 use Dakujem\Migrun\Executor\ContainerInvoker;
 use Dakujem\Migrun\Executor\Executor;
 use Dakujem\Migrun\Executor\InvokesCallable;
+use Dakujem\Migrun\Executor\TrivialInvoker;
 use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\Migration;
 use Dakujem\Migrun\ReversibleMigration;
@@ -302,6 +303,30 @@ return new class implements ReversibleMigration {
         self::assertFileExists($flag);
         self::assertSame('hello-from-custom-invoker', file_get_contents($flag));
         unlink($flag);
+    }
+
+    public function testTrivialInvokerInvokesCallableWithNoArguments(): void
+    {
+        $flag = $this->dir . '/trivial.flag';
+
+        file_put_contents(
+            "{$this->dir}/20240101_120000_trivial.php",
+            "<?php return function() { file_put_contents('" . addslashes($flag) . "', 'ok'); };",
+        );
+
+        $executor = new Executor(new TrivialInvoker());
+        $executor->execute($this->migrationFile('20240101_120000_trivial.php'), Direction::Up);
+
+        self::assertFileExists($flag);
+        self::assertSame('ok', file_get_contents($flag));
+        unlink($flag);
+    }
+
+    public function testTrivialInvokerReturnsCallableReturnValue(): void
+    {
+        $invoker = new TrivialInvoker();
+        $result = $invoker->invoke(fn() => 'hello');
+        self::assertSame('hello', $result);
     }
 }
 

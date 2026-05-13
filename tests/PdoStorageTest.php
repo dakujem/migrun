@@ -193,4 +193,36 @@ final class PdoStorageTest extends TestCase
         $this->storage->markApplied($id);
         self::assertTrue($this->storage->isApplied($id));
     }
+
+    // -------------------------------------------------------------------------
+    // Corrupted rows inserted directly into the table
+    // -------------------------------------------------------------------------
+
+    public function testGetAppliedThrowsOnCorruptedTimestampInRow(): void
+    {
+        // Bootstrap the table, then insert a row with a bad timestamp directly.
+        $this->storage->markApplied('20240101_bootstrap');
+        $this->pdo->exec(
+            "INSERT INTO migrun_migrations (id, applied_at) VALUES ('20240101_bad_ts', 'not-a-timestamp')",
+        );
+
+        // A fresh instance so the cache is cold.
+        $fresh = new PdoStorage($this->pdo);
+        $this->expectException(\RuntimeException::class);
+        iterator_to_array($fresh->getApplied());
+    }
+
+    public function testGetAppliedThrowsWhenStoredIdExceedsMaxLength(): void
+    {
+        // Bootstrap the table, then bypass the guard to insert an oversized ID.
+        $this->storage->markApplied('20240101_bootstrap');
+        $oversizedId = str_repeat('x', PdoStorage::MaximumIdLength + 1);
+        $at = (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM);
+        $stmt = $this->pdo->prepare("INSERT INTO migrun_migrations (id, applied_at) VALUES (?, ?)");
+        $stmt->execute([$oversizedId, $at]);
+
+        $fresh = new PdoStorage($this->pdo);
+        $this->expectException(\LengthException::class);
+        iterator_to_array($fresh->getApplied());
+    }
 }

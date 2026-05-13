@@ -586,4 +586,21 @@ final class MigrunBuilderTest extends TestCase
         $result = $subclass->directory($dir, recursive: false);
         self::assertInstanceOf($subclass::class, $result);
     }
+
+    // -------------------------------------------------------------------------
+    // Storage — mysqli with mock (no live MySQL required)
+    // -------------------------------------------------------------------------
+
+    public function testMysqliStorageIsBuiltWithMockConnection(): void
+    {
+        $conn = $this->createMock(mysqli::class);
+
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->mysqliStorage($conn)
+            ->build();
+
+        $storage = $this->prop($orchestrator, 'storage');
+        self::assertInstanceOf(MysqliStorage::class, $storage);
+    }
 }

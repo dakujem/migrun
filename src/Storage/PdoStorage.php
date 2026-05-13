@@ -156,19 +156,20 @@ final class PdoStorage implements TracksMigrations
      */
     private function rowToEntry(mixed $row): MigrationHistoryEntry
     {
-        if (is_array($row) && isset($row['id'], $row['applied_at'])) {
-            $this->assertIdLength($row['id']);
-            $at = DateTimeImmutable::createFromFormat(DateTimeInterface::ATOM, $row['applied_at'])
-                ?: throw new RuntimeException(
-                    "Migration storage table contains a corrupted timestamp for id={$row['id']}: {$row['applied_at']}",
-                );
-            return new MigrationHistoryEntry(
-                id: $row['id'],
-                at: $at,
-            );
+        if (!is_array($row) || !isset($row['id'], $row['applied_at'])) {
+            throw new RuntimeException('Migration storage table returned an unexpected row structure.');
         }
 
-        throw new RuntimeException('Migration storage table returned an unexpected row structure.');
+        $this->assertIdLength($row['id']);
+        $at = DateTimeImmutable::createFromFormat(DateTimeInterface::ATOM, $row['applied_at'])
+            ?: throw new RuntimeException(
+                "Migration storage table contains a corrupted timestamp for id={$row['id']}: {$row['applied_at']}",
+            );
+
+        return new MigrationHistoryEntry(
+            id: $row['id'],
+            at: $at,
+        );
     }
 
     private function assertIdLength(string $id): void
