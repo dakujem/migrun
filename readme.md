@@ -1,5 +1,8 @@
 # Migrun
 
+[![Test Suite](https://github.com/dakujem/migrun/actions/workflows/php-test.yml/badge.svg)](https://github.com/dakujem/migrun/actions/workflows/php-test.yml)
+[![Coverage Status](https://coveralls.io/repos/github/dakujem/migrun/badge.svg?branch=trunk)](https://coveralls.io/github/dakujem/migrun?branch=trunk)
+
 A lightweight, flexible migration runner for your PHP stack.
 
 Database migrations on your terms.  
