@@ -723,6 +723,191 @@ final class TransactionalExecutor implements ExecutesMigrations
 ```
 
 
+### Concurrency and locking
+
+Migrun ships **no locking**.  
+If two migration runs can overlap — two deploys racing, a
+CI job and a manual run, two web nodes booting at once — you should serialize them
+yourself. This section shows how, in a few lines of your own code.
+
+#### Lock the whole runner, not each migration
+
+`Orchestrator::run()` loops over migrations doing *check-then-act*: it asks storage
+`isApplied()`, executes the migration, then records it. Across two processes that is a
+[TOCTOU](https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use) race — both can
+see the same migration as pending and both run it. Locking each migration
+individually does **not** fix this (the gap between check and lock still races, and
+interleaving two runs violates the ordering that later migrations depend on).
+
+A single lock around the **entire run** makes the whole check-execute-record sequence
+atomic and preserves order. It is both the correct granularity and the simpler one.
+
+#### The `RunsMigrations` seam
+
+`Orchestrator` implements the `RunsMigrations` interface (`run()`, `rollback()`,
+`status()`). Type against it and you can wrap the runner transparently — for locking,
+but equally for logging, timing, or event emission:
+
+```php
+use Dakujem\Migrun\RunsMigrations;
+```
+
+#### A minimal mutex contract
+
+Define a tiny lock abstraction. A `withLock(callable)` shape (rather than
+separate acquire/release calls) guarantees the lock is released even if a migration
+throws — mirroring how `InvokesCallable::invoke()` works in this library:
+
+```php
+interface Mutex
+{
+    /** Run $critical while holding an exclusive lock; release on return or throw. */
+    public function withLock(callable $critical): mixed;
+}
+
+final class CouldNotAcquireLock extends \RuntimeException {}
+```
+
+#### A locking decorator
+
+Wrap the runner. Only `run()` and `rollback()` mutate — `status()` is read-only and
+passes through unlocked:
+
+```php
+use Dakujem\Migrun\RunsMigrations;
+
+final readonly class LockingOrchestrator implements RunsMigrations
+{
+    public function __construct(
+        private RunsMigrations $inner,
+        private Mutex $mutex,
+    ) {}
+
+    public function run(): array
+    {
+        return $this->mutex->withLock(fn() => $this->inner->run());
+    }
+
+    public function rollback(int $steps = 1): array
+    {
+        return $this->mutex->withLock(fn() => $this->inner->rollback($steps));
+    }
+
+    public function status(): array
+    {
+        return $this->inner->status();
+    }
+}
+```
+
+#### Example: file lock (`flock`)
+
+Good for single-host setups and the JSON/SQLite storage backends. The OS releases the
+lock automatically if the process dies, so a crash cannot strand it:
+
+```php
+final class FlockMutex implements Mutex
+{
+    /** @param bool $wait true = block until the lock is free; false = fail fast. */
+    public function __construct(
+        private string $lockFile,
+        private bool $wait = true,
+    ) {}
+
+    public function withLock(callable $critical): mixed
+    {
+        $handle = fopen($this->lockFile, 'c');
+        if ($handle === false) {
+            throw new CouldNotAcquireLock("Cannot open lock file: {$this->lockFile}");
+        }
+        $flags = LOCK_EX | ($this->wait ? 0 : LOCK_NB);
+        if (!flock($handle, $flags)) {
+            fclose($handle);
+            throw new CouldNotAcquireLock("Another migration run holds the lock: {$this->lockFile}");
+        }
+        try {
+            return $critical();
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+}
+```
+
+#### Example: database advisory lock (PDO)
+
+For multi-host setups, a database advisory lock coordinates every node through the
+database itself. Advisory locks are **session-scoped**, so the mutex must reuse the
+**same PDO connection** that runs the migrations (and, ideally, the storage). The lock
+is released automatically if the connection drops:
+
+```php
+// MySQL / MariaDB — GET_LOCK / RELEASE_LOCK
+final class PdoAdvisoryMutex implements Mutex
+{
+    public function __construct(
+        private \PDO $pdo,            // the SAME connection used to run migrations
+        private string $name = 'migrun',
+        private int $timeout = 10,    // seconds to wait before giving up
+    ) {}
+
+    public function withLock(callable $critical): mixed
+    {
+        $acquire = $this->pdo->prepare('SELECT GET_LOCK(?, ?)');
+        $acquire->execute([$this->name, $this->timeout]);
+        if ((string) $acquire->fetchColumn() !== '1') {
+            throw new CouldNotAcquireLock("Timed out acquiring advisory lock: {$this->name}");
+        }
+        try {
+            return $critical();
+        } finally {
+            $this->pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$this->name]);
+        }
+    }
+}
+```
+
+For **PostgreSQL**, swap the SQL for session advisory locks:
+`SELECT pg_advisory_lock(hashtext(?))` to acquire and
+`SELECT pg_advisory_unlock(hashtext(?))` to release (Postgres keys are integers, so
+hash the name). **SQLite** has no advisory-lock function — use `FlockMutex` on the
+database file instead.
+
+#### Trade-offs
+
+- **Wait vs. fail fast.** CLI/deploy runs usually want to *wait* (block with a
+  timeout) so a racing run queues instead of erroring; a CI gate may prefer to fail
+  fast. Make it a constructor flag on the concrete mutex, as shown above.
+- **Crash safety.** `flock` and database advisory locks auto-release when the process
+  or connection dies. Avoid a "lock row" design (INSERT a sentinel row, delete it at
+  the end) — if the process is killed mid-run the row is stranded and needs manual or
+  TTL-based cleanup.
+- **Same connection for advisory locks.** Because `GET_LOCK` / `pg_advisory_lock` are
+  bound to the session, `PdoAdvisoryMutex` must share the connection that executes the
+  migrations. The recommended single-`$pdo` setup already satisfies this.
+
+#### Wiring it up
+
+```php
+$orchestrator = (new MigrunBuilder())
+    ->directory(__DIR__ . '/migrations')
+    ->pdoStorage($pdo)
+    ->container($container)
+    ->build();
+
+// Wrap with the lock of your choice:
+$runner = new LockingOrchestrator($orchestrator, new PdoAdvisoryMutex($pdo));
+// or, for single-host / file storage:
+// $runner = new LockingOrchestrator($orchestrator, new FlockMutex(__DIR__ . '/migrations/.migrun/migrun.lock'));
+
+$runner->run();
+```
+
+`$runner` is a `RunsMigrations`, so it drops straight into the CLI script or Symfony
+command shown earlier in place of the bare `Orchestrator`.
+
+
 ### Seeders
 
 Because an `Orchestrator` is just a directory + storage + invoker, you can run a second one for database seeders with no extra infrastructure:
