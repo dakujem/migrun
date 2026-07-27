@@ -30,7 +30,7 @@ use Dakujem\Migrun\Exception\MigrationNotFoundException;
  *        - file only        → Pending  (appliedAt null, path set)
  *        - history only     → Missing  (appliedAt set, path null)
  */
-final readonly class Orchestrator
+final readonly class Orchestrator implements RunsMigrations
 {
     public function __construct(
         private TracksMigrations $storage,

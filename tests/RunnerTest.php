@@ -12,6 +12,7 @@ use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
 use Dakujem\Migrun\MigrationState;
 use Dakujem\Migrun\Orchestrator;
+use Dakujem\Migrun\RunsMigrations;
 use Dakujem\Migrun\TracksMigrations;
 use PHPUnit\Framework\TestCase;
 
@@ -379,5 +380,39 @@ final class RunnerTest extends TestCase
         self::assertSame(MigrationState::Applied, $entries[3]->state);
         self::assertNotNull($entries[3]->appliedAt);
         self::assertNotNull($entries[3]->path);
+    }
+
+    // -------------------------------------------------------------------------
+    // RunsMigrations seam
+    // -------------------------------------------------------------------------
+
+    public function testOrchestratorImplementsRunsMigrations(): void
+    {
+        $runner = new Orchestrator(new SpyStorage(), $this->stubFinder([]), new SpyExecutor());
+
+        self::assertInstanceOf(RunsMigrations::class, $runner);
+    }
+
+    public function testRunsMigrationsContractIsUsableThroughTheInterfaceType(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+        $m2 = $this->migration('20240115_090000_beta');
+
+        $storage = new SpyStorage([$m1->id()]); // m1 already applied, m2 pending
+        $finder = $this->stubFinder([$m1, $m2]);
+
+        // Bind to the interface, not the concrete class, to exercise the seam.
+        $runner = new Orchestrator($storage, $finder, new SpyExecutor());
+        self::assertInstanceOf(RunsMigrations::class, $runner);
+
+        $wrap = static fn(RunsMigrations $r): RunsMigrations => $r;
+        $interfaceTyped = $wrap($runner);
+
+        $executed = $interfaceTyped->run();
+        self::assertCount(1, $executed);
+        self::assertSame($m2->id(), $executed[0]->id());
+
+        self::assertSame([], $interfaceTyped->rollback(0));
+        self::assertCount(2, $interfaceTyped->status());
     }
 }
