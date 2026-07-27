@@ -36,7 +36,7 @@ use Dakujem\Migrun\Exception\MigrationNotFoundException;
  * collation, the JSON file by insertion order), so relying on them would let run order,
  * rollback order and status order drift apart.
  */
-final readonly class Orchestrator
+final readonly class Orchestrator implements RunsMigrations
 {
     public function __construct(
         private TracksMigrations $storage,
