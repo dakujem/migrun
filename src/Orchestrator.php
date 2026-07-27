@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dakujem\Migrun;
 
 use Dakujem\Migrun\Exception\MigrationNotFoundException;
+use Throwable;
 
 /**
  * Orchestrates the full migration run or rollback cycle:
@@ -36,16 +37,23 @@ final readonly class Orchestrator implements RunsMigrations
         private TracksMigrations $storage,
         private DiscoversMigrations $finder,
         private ExecutesMigrations $executor,
+        private ReportsMigrations $reporter = new NullReporter(),
     ) {
     }
 
     /**
      * Execute all pending migrations.
      *
+     * @param ReportsMigrations|null $reporter Optional reporter used for this call only,
+     *        overriding the one given to the constructor. Handy when the reporter depends on
+     *        per-invocation state (e.g. a console OutputInterface), so the runner itself can
+     *        still be a plain, reusable service. When null, the constructor's reporter
+     *        (a NullReporter by default) is used.
      * @return MigrationRun[] The migrations that were executed.
      */
-    public function run(): array
+    public function run(?ReportsMigrations $reporter = null): array
     {
+        $reporter ??= $this->reporter;
         $all = $this->finder->list();
 
         $executed = [];
@@ -54,15 +62,23 @@ final readonly class Orchestrator implements RunsMigrations
                 continue;
             }
 
-            $start = microtime(true);
-            $this->executor->execute($migration, Direction::Up);
-            $end = microtime(true);
+            $reporter->starting($migration, Direction::Up);
+            try {
+                $start = microtime(true);
+                $this->executor->execute($migration, Direction::Up);
+                $end = microtime(true);
+            } catch (Throwable $e) {
+                $reporter->failed($migration, Direction::Up, $e);
+                throw $e;
+            }
 
             $this->storage->markApplied($migration->id());
-            $executed[] = new MigrationRun(
+            $run = new MigrationRun(
                 $migration,
                 $end - $start,
             );
+            $executed[] = $run;
+            $reporter->finished($run, Direction::Up);
         }
 
         return $executed;
@@ -71,11 +87,14 @@ final readonly class Orchestrator implements RunsMigrations
     /**
      * Roll back the last $steps migrations.
      *
+     * @param ReportsMigrations|null $reporter Optional per-call reporter — see run().
      * @return MigrationRun[] The migrations that were rolled back.
      * @throws MigrationNotFoundException if a recorded migration cannot be found on disk.
      */
-    public function rollback(int $steps = 1): array
+    public function rollback(int $steps = 1, ?ReportsMigrations $reporter = null): array
     {
+        $reporter ??= $this->reporter;
+
         // Storage returns most-recent-first; collect only the first $steps entries.
         $targets = [];
         foreach ($this->storage->getApplied() as $entry) {
@@ -92,15 +111,23 @@ final readonly class Orchestrator implements RunsMigrations
         foreach ($targets as $entry) {
             $migration = $available[$entry->id()];
 
-            $start = microtime(true);
-            $this->executor->execute($migration, Direction::Down);
-            $end = microtime(true);
+            $reporter->starting($migration, Direction::Down);
+            try {
+                $start = microtime(true);
+                $this->executor->execute($migration, Direction::Down);
+                $end = microtime(true);
+            } catch (Throwable $e) {
+                $reporter->failed($migration, Direction::Down, $e);
+                throw $e;
+            }
 
             $this->storage->markReverted($migration->id());
-            $reverted[] = new MigrationRun(
+            $run = new MigrationRun(
                 $migration,
                 $end - $start,
             );
+            $reverted[] = $run;
+            $reporter->finished($run, Direction::Down);
         }
 
         return $reverted;

@@ -458,6 +458,48 @@ final class MigrunBuilderTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Reporter
+    // -------------------------------------------------------------------------
+
+    public function testDefaultReporterIsNullReporter(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->build();
+
+        self::assertInstanceOf(
+            \Dakujem\Migrun\NullReporter::class,
+            $this->prop($orchestrator, 'reporter'),
+        );
+    }
+
+    public function testConfiguredReporterIsWiredIntoOrchestrator(): void
+    {
+        $reporter = new \Dakujem\Migrun\NullReporter();
+
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->reporter($reporter)
+            ->build();
+
+        self::assertSame($reporter, $this->prop($orchestrator, 'reporter'));
+    }
+
+    public function testResettingReporterToNullRestoresNullReporter(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->reporter(new \Dakujem\Migrun\NullReporter())
+            ->reporter(null) // reset
+            ->build();
+
+        self::assertInstanceOf(
+            \Dakujem\Migrun\NullReporter::class,
+            $this->prop($orchestrator, 'reporter'),
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // Finder configuration
     // -------------------------------------------------------------------------
 
@@ -514,6 +556,7 @@ final class MigrunBuilderTest extends TestCase
 
         self::assertSame($builder, $builder->directory($this->dir));
         self::assertSame($builder, $builder->container(null));
+        self::assertSame($builder, $builder->reporter(null));
         self::assertSame($builder, $builder->fileStorage(null));
         self::assertSame($builder, $builder->sqliteStorage(null));
         self::assertSame($builder, $builder->pdoStorage(null));
