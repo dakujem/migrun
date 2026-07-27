@@ -275,6 +275,7 @@ $orchestrator = (new MigrunBuilder())
     ->directory(__DIR__ . '/migrations')           // required; pass recursive: false to disable subdirectory scanning
     ->container($container)                        // PSR-11 container; omit for no-autowiring mode
     ->pdoStorage($pdo)                             // recommended: history in the same DB as migrations
+    ->reporter(new MyReporter())                   // live progress as each migration runs; omit for none
     ->build();
 ```
 
@@ -448,6 +449,13 @@ php bin/migrate.php rollback 3
 php bin/migrate.php status
 ```
 
+> 📄 **A complete, ready-to-adapt version of this script lives in
+> [`examples/migrate.php`](examples/migrate.php).**
+> It builds on the snippet above with live progress output, concurrency locking, a
+> `create` scaffolder, colored terminal output, and CI-friendly exit codes.
+> Start there if you want the full picture of a finished Migrun integration —
+> the sections below explain each piece of it in isolation.
+
 
 ### Via Composer scripts
 
@@ -585,6 +593,178 @@ php bin/console db:migrate status
 ```
 
 
+### Live progress output
+
+The examples above collect the result array and print it *after* the whole batch
+finishes. For a long-running set — or just nicer feedback — you can report
+progress **as each migration runs** by giving the runner a reporter.
+
+A reporter implements `ReportsMigrations`. The `Orchestrator` calls it around
+every individual migration:
+
+- `starting()` — a migration is about to run (Up or Down),
+- `finished()` — it succeeded (with its measured duration),
+- `failed()` — it threw; the run then aborts as usual, re-throwing the error.
+
+Because `failed()` receives the exact migration that threw, you no longer need to
+reconstruct *where* a run stopped — the reporter names it directly.
+
+#### A plain reporter (standalone script)
+
+Aligned with the `bin/migrate.php` script above — it just writes to stdout:
+
+```php
+<?php
+
+use Dakujem\Migrun\Direction;
+use Dakujem\Migrun\MigrationFile;
+use Dakujem\Migrun\MigrationRun;
+use Dakujem\Migrun\ReportsMigrations;
+
+final class EchoReporter implements ReportsMigrations
+{
+    public function starting(MigrationFile $file, Direction $direction): void
+    {
+        $verb = $direction === Direction::Up ? 'Migrating' : 'Reverting';
+        echo "{$verb} {$file->id()} ... ";
+    }
+
+    public function finished(MigrationRun $run, Direction $direction): void
+    {
+        echo sprintf('done (%.3fs)', $run->durationSeconds) . PHP_EOL;
+    }
+
+    public function failed(MigrationFile $file, Direction $direction, \Throwable $error): void
+    {
+        echo 'FAILED' . PHP_EOL;
+        echo "  {$error->getMessage()}" . PHP_EOL;
+    }
+}
+```
+
+Wire it via the builder — everything else in the script stays the same:
+
+```php
+$orchestrator = (new MigrunBuilder())
+    ->directory(__DIR__ . '/../migrations')
+    ->container($container)
+    ->reporter(new EchoReporter())   // live progress as each migration runs
+    ->build();
+
+// run()/rollback() now print as they go; the returned array is still
+// available if you want a final summary on top.
+$orchestrator->run();
+```
+
+Output while running:
+
+```
+Migrating 20240101_120000_create_users ... done (0.012s)
+Migrating 20240115_093000_add_email_index ... done (0.004s)
+Migrating 20240120_080000_backfill_slugs ... FAILED
+  SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry
+```
+
+> Only need to react to *some* events? Extend `NullReporter` (a no-op base) and
+> override just the methods you care about, instead of implementing the full
+> interface. This also keeps your reporter working if the contract ever grows.
+
+#### A Symfony Console reporter
+
+Aligned with the `MigrateCommand` above, this one writes through the command's
+`OutputInterface` and uses console styling tags:
+
+```php
+<?php
+
+use Dakujem\Migrun\Direction;
+use Dakujem\Migrun\MigrationFile;
+use Dakujem\Migrun\MigrationRun;
+use Dakujem\Migrun\ReportsMigrations;
+use Symfony\Component\Console\Output\OutputInterface;
+
+final readonly class ConsoleReporter implements ReportsMigrations
+{
+    public function __construct(private OutputInterface $output) {}
+
+    public function starting(MigrationFile $file, Direction $direction): void
+    {
+        $verb = $direction === Direction::Up ? 'Migrating' : 'Reverting';
+        $this->output->write("{$verb} <info>{$file->id()}</info> ... ");
+    }
+
+    public function finished(MigrationRun $run, Direction $direction): void
+    {
+        $this->output->writeln(sprintf('<comment>done (%.3fs)</comment>', $run->durationSeconds));
+    }
+
+    public function failed(MigrationFile $file, Direction $direction, \Throwable $error): void
+    {
+        $this->output->writeln('<error>FAILED</error>');
+        $this->output->writeln("  {$error->getMessage()}");
+    }
+}
+```
+
+The reporter needs the `$output`, which only exists inside `execute()`. Rather than
+rebuild the runner per invocation, pass the reporter **per call**: `run()` and
+`rollback()` accept an optional trailing `ReportsMigrations` argument that overrides
+the constructor's reporter for that one call. So inject a normal, reusable
+`Orchestrator` and hand it a fresh reporter each run:
+
+```php
+final class MigrateCommand extends Command
+{
+    // A plain, reusable service — built once, injected like any other.
+    public function __construct(private Orchestrator $runner)
+    {
+        parent::__construct('db:migrate');
+    }
+
+    protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        // Request-scoped: the reporter wraps this invocation's $output.
+        $reporter = new ConsoleReporter($output);
+
+        match ($input->getArgument('command')) {
+            'run'      => $this->runner->run($reporter),
+            'rollback' => $this->runner->rollback((int) $input->getArgument('steps'), $reporter),
+            'status'   => $this->status($output),   // unchanged — status() takes no reporter
+            default    => throw new \InvalidArgumentException('Unknown command.'),
+        };
+
+        return Command::SUCCESS;
+    }
+}
+```
+
+See [`examples/migrate.php`](examples/migrate.php) for a reporter that also handles
+colored output, with TTY and [`NO_COLOR`](https://no-color.org) detection.
+
+#### Passing a reporter through an abstraction
+
+The base `RunsMigrations` contract deliberately declares no reporter parameter, so it
+cannot express "pass a reporter". When you need that through an interface rather than
+the concrete class — typically in a **decorator** — type against
+`RunsMigrationsWithReporter`, which extends `RunsMigrations` and adds the parameter:
+
+```php
+use Dakujem\Migrun\RunsMigrationsWithReporter;
+
+// Orchestrator implements this, so it is also a RunsMigrations.
+function migrate(RunsMigrationsWithReporter $runner, ReportsMigrations $reporter): void
+{
+    $runner->run($reporter);
+}
+```
+
+> **Why this matters in a decorator.** If you type the wrapped runner as plain
+> `RunsMigrations` and still call `$inner->run($reporter)`, PHP silently discards the
+> argument for any implementation that does not declare it — the reporter vanishes and
+> live progress goes quiet, with no error at all. Static analysers do flag the call.
+> Use `RunsMigrationsWithReporter` for both the decorator and its inner runner.
+
+
 ## Extending
 
 ### Concepts
@@ -595,7 +775,8 @@ php bin/console db:migrate status
 | Discover migration files | `DiscoversMigrations` | `DirectoryFinder` — scans a directory |
 | Invoke migration callables | `InvokesCallable` | `ContainerInvoker` (PSR-11 autowired), `TrivialInvoker` (no args) |
 | Load and run a migration | `ExecutesMigrations` | `Executor` — delegates to an `InvokesCallable` |
-| Orchestrate the whole flow | — | `Orchestrator` |
+| Report progress during a run | `ReportsMigrations` | `NullReporter` — no-op default and base class |
+| Orchestrate the whole flow | `RunsMigrations`<br>`RunsMigrationsWithReporter` — adds the per-call reporter | `Orchestrator` |
 
 Every part is replaceable. Wire the built-ins for quick setup; swap them out as your project grows.
 
@@ -811,6 +992,11 @@ but equally for logging, timing, or event emission:
 use Dakujem\Migrun\RunsMigrations;
 ```
 
+> If your decorator needs to forward a **reporter** for live progress, type it and its
+> inner runner against `RunsMigrationsWithReporter` instead — see
+> [Passing a reporter through an abstraction](#passing-a-reporter-through-an-abstraction).
+> The decorator below keeps the plain contract, since it forwards no reporter.
+
 #### A minimal mutex contract
 
 Define a tiny lock abstraction. A `withLock(callable)` shape (rather than
@@ -965,6 +1151,10 @@ $runner->run();
 
 `$runner` is a `RunsMigrations`, so it drops straight into the CLI script or Symfony
 command shown earlier in place of the bare `Orchestrator`.
+
+[`examples/migrate.php`](examples/migrate.php) shows this wired into a working script —
+the mutex, the decorator, and a distinct exit code so a caller can tell lock contention
+apart from a failed migration.
 
 
 ### Seeders

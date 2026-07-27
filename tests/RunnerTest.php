@@ -96,6 +96,33 @@ final class SpyExecutor implements ExecutesMigrations
     }
 }
 
+/**
+ * Records every reporter call as a [event, id, direction] tuple, in order.
+ */
+final class SpyReporter implements \Dakujem\Migrun\ReportsMigrations
+{
+    /** @var array<int, array{0:string, 1:string, 2:Direction}> */
+    public array $events = [];
+    /** @var float[] Durations captured on each finished() call. */
+    public array $durations = [];
+
+    public function starting(MigrationFile $file, Direction $direction): void
+    {
+        $this->events[] = ['starting', $file->id(), $direction];
+    }
+
+    public function finished(\Dakujem\Migrun\MigrationRun $run, Direction $direction): void
+    {
+        $this->events[] = ['finished', $run->id(), $direction];
+        $this->durations[] = $run->durationSeconds;
+    }
+
+    public function failed(MigrationFile $file, Direction $direction, \Throwable $error): void
+    {
+        $this->events[] = ['failed', $file->id(), $direction];
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 final class RunnerTest extends TestCase
@@ -395,6 +422,162 @@ final class RunnerTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Reporter (ReportsMigrations)
+    // -------------------------------------------------------------------------
+
+    public function testRunReportsStartingAndFinishedForEachMigrationInOrder(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+        $m2 = $this->migration('20240115_090000_beta');
+
+        $storage = new SpyStorage([]);              // nothing applied yet
+        $finder = $this->stubFinder([$m1, $m2]);
+        $reporter = new SpyReporter();
+
+        $runner = new Orchestrator($storage, $finder, new SpyExecutor(), $reporter);
+        $runner->run();
+
+        self::assertSame(
+            [
+                ['starting', $m1->id(), Direction::Up],
+                ['finished', $m1->id(), Direction::Up],
+                ['starting', $m2->id(), Direction::Up],
+                ['finished', $m2->id(), Direction::Up],
+            ],
+            $reporter->events,
+        );
+
+        // A duration is measured and reported for each finished migration.
+        self::assertCount(2, $reporter->durations);
+        foreach ($reporter->durations as $duration) {
+            self::assertGreaterThanOrEqual(0.0, $duration);
+        }
+    }
+
+    public function testRunReportsFailedForTheThrowingMigrationThenReThrows(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+        $m2 = $this->migration('20240115_090000_beta');
+
+        $storage = new SpyStorage([]);
+        $finder = $this->stubFinder([$m1, $m2]);
+        $reporter = new SpyReporter();
+
+        // Executor that fails on m2.
+        $executor = new class implements ExecutesMigrations {
+            public function execute(MigrationFile $migration, Direction $direction): void
+            {
+                if ($migration->id() === '20240115_090000_beta') {
+                    throw new \RuntimeException('boom');
+                }
+            }
+        };
+
+        $runner = new Orchestrator($storage, $finder, $executor, $reporter);
+
+        try {
+            $runner->run();
+            self::fail('Expected the migration failure to propagate.');
+        } catch (\RuntimeException $e) {
+            self::assertSame('boom', $e->getMessage());
+        }
+
+        self::assertSame(
+            [
+                ['starting', $m1->id(), Direction::Up],
+                ['finished', $m1->id(), Direction::Up],
+                ['starting', $m2->id(), Direction::Up],
+                ['failed',   $m2->id(), Direction::Up],
+            ],
+            $reporter->events,
+        );
+    }
+
+    public function testRollbackReportsInDownDirection(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+        $m2 = $this->migration('20240115_090000_beta');
+
+        $storage = new SpyStorage([$m1->id(), $m2->id()]);
+        $finder = $this->stubFinder([$m1, $m2]);
+        $reporter = new SpyReporter();
+
+        $runner = new Orchestrator($storage, $finder, new SpyExecutor(), $reporter);
+        $runner->rollback(1);
+
+        self::assertSame(
+            [
+                ['starting', $m2->id(), Direction::Down],
+                ['finished', $m2->id(), Direction::Down],
+            ],
+            $reporter->events,
+        );
+    }
+
+    public function testDefaultReporterIsANullReporterAndDoesNotInterfere(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+
+        // No reporter argument — the NullReporter default must be used.
+        $runner = new Orchestrator(new SpyStorage([]), $this->stubFinder([$m1]), new SpyExecutor());
+        $executed = $runner->run();
+
+        self::assertCount(1, $executed);
+        self::assertSame($m1->id(), $executed[0]->id());
+    }
+
+    public function testPerCallReporterOverridesConstructorReporter(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+
+        $constructorReporter = new SpyReporter();
+        $callReporter = new SpyReporter();
+
+        $runner = new Orchestrator(
+            new SpyStorage([]),
+            $this->stubFinder([$m1]),
+            new SpyExecutor(),
+            $constructorReporter,
+        );
+
+        // The per-call reporter must be used for this call...
+        $runner->run($callReporter);
+
+        self::assertSame(
+            [
+                ['starting', $m1->id(), Direction::Up],
+                ['finished', $m1->id(), Direction::Up],
+            ],
+            $callReporter->events,
+        );
+
+        // ...and the constructor's reporter must not be touched.
+        self::assertSame([], $constructorReporter->events);
+    }
+
+    public function testRollbackAcceptsPerCallReporter(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+
+        $callReporter = new SpyReporter();
+        $runner = new Orchestrator(
+            new SpyStorage([$m1->id()]),
+            $this->stubFinder([$m1]),
+            new SpyExecutor(),
+        );
+
+        $runner->rollback(1, $callReporter);
+
+        self::assertSame(
+            [
+                ['starting', $m1->id(), Direction::Down],
+                ['finished', $m1->id(), Direction::Down],
+            ],
+            $callReporter->events,
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // RunsMigrations seam
     // -------------------------------------------------------------------------
 
@@ -403,6 +586,64 @@ final class RunnerTest extends TestCase
         $runner = new Orchestrator(new SpyStorage(), $this->stubFinder([]), new SpyExecutor());
 
         self::assertInstanceOf(RunsMigrations::class, $runner);
+    }
+
+    public function testOrchestratorImplementsRunsMigrationsWithReporter(): void
+    {
+        $runner = new Orchestrator(new SpyStorage(), $this->stubFinder([]), new SpyExecutor());
+
+        self::assertInstanceOf(\Dakujem\Migrun\RunsMigrationsWithReporter::class, $runner);
+        // The reporting-aware contract extends the base one, so it satisfies both.
+        self::assertInstanceOf(RunsMigrations::class, $runner);
+    }
+
+    /**
+     * A decorator typed against RunsMigrationsWithReporter must be able to forward a
+     * reporter through the interface — this is the seam that plain RunsMigrations cannot
+     * express, because its run()/rollback() do not declare the parameter.
+     */
+    public function testReporterCanBeForwardedThroughTheReportingInterface(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+        $reporter = new SpyReporter();
+
+        $inner = new Orchestrator(new SpyStorage([]), $this->stubFinder([$m1]), new SpyExecutor());
+
+        // A minimal pass-through decorator, typed against the reporting-aware contract.
+        $decorator = new class($inner) implements \Dakujem\Migrun\RunsMigrationsWithReporter {
+            public function __construct(private \Dakujem\Migrun\RunsMigrationsWithReporter $inner) {}
+
+            public function run(?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
+            {
+                return $this->inner->run($reporter);
+            }
+
+            public function rollback(int $steps = 1, ?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
+            {
+                return $this->inner->rollback($steps, $reporter);
+            }
+
+            public function status(): array
+            {
+                return $this->inner->status();
+            }
+        };
+
+        $executed = $decorator->run($reporter);
+
+        self::assertCount(1, $executed);
+        // The reporter survived the hop through the decorator.
+        self::assertSame(
+            [
+                ['starting', $m1->id(), Direction::Up],
+                ['finished', $m1->id(), Direction::Up],
+            ],
+            $reporter->events,
+        );
+
+        // The decorator is still usable wherever the base contract is expected.
+        $wrap = static fn(RunsMigrations $r): RunsMigrations => $r;
+        self::assertInstanceOf(RunsMigrations::class, $wrap($decorator));
     }
 
     public function testRunsMigrationsContractIsUsableThroughTheInterfaceType(): void

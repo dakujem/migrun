@@ -6,6 +6,28 @@ Migrun follows semantic versioning.
 Please report any issues.
 
 
+## v1.1
+
+Live progress reporting, and interfaces for the runner.
+
+A runner can now be given a **reporter** (`ReportsMigrations`) that is called around each migration as
+it runs, so a CLI or web script can display progress instead of waiting for the whole batch to
+finish — and a migration that throws is named directly, instead of having to be worked out afterwards.
+Extend `NullReporter` to handle only the events you care about. Configure one with
+`MigrunBuilder::reporter()`, or pass one per call to `run()` and `rollback()` when it depends on
+per-invocation state such as a console output.
+
+`Orchestrator` now implements **`RunsMigrations`** (`run`, `rollback`, `status`), so the runner can be
+decorated transparently — for mutual-exclusion locking, logging or timing — without callers depending
+on the concrete class. `RunsMigrationsWithReporter` extends it with the optional per-call reporter
+argument; type against that one when a decorator has to forward a reporter.
+
+Everything here is additive and optional. Existing setups keep working untouched, and `run()` and
+`rollback()` still return the same arrays.
+
+Includes the fix from v1.0.1.
+
+
 ## v1.0.1
 
 Fixes migration ordering.

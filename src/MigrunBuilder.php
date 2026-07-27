@@ -54,6 +54,7 @@ class MigrunBuilder
     protected ?string $directory = null;
     protected ?ContainerInterface $container = null;
     protected bool $recursive = true;
+    protected ?ReportsMigrations $reporter = null;
 
     // Storage slots — at most one may be non-null when build() is called.
     protected ?string $storagePath = null;
@@ -91,6 +92,21 @@ class MigrunBuilder
     public function container(?ContainerInterface $container): static
     {
         $this->container = $container;
+        return $this;
+    }
+
+    /**
+     * Reporter that observes the run/rollback as it happens, for live progress output.
+     *
+     * When omitted (or reset to null), a NullReporter is used and nothing is reported;
+     * run() and rollback() simply return their result arrays as before.
+     *
+     * See ReportsMigrations for the contract, and NullReporter for a base class to
+     * extend when you only want to react to some of the events.
+     */
+    public function reporter(?ReportsMigrations $reporter): static
+    {
+        $this->reporter = $reporter;
         return $this;
     }
 
@@ -176,7 +192,12 @@ class MigrunBuilder
             : new TrivialInvoker();
         $executor = new Executor($invoker);
 
-        return new Orchestrator($storage, $finder, $executor);
+        return new Orchestrator(
+            $storage,
+            $finder,
+            $executor,
+            $this->reporter ?? new NullReporter(),
+        );
     }
 
     // -------------------------------------------------------------------------

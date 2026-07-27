@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dakujem\Migrun;
 
 use Dakujem\Migrun\Exception\MigrationNotFoundException;
+use Throwable;
 
 /**
  * Orchestrates the full migration run or rollback cycle:
@@ -36,22 +37,30 @@ use Dakujem\Migrun\Exception\MigrationNotFoundException;
  * collation, the JSON file by insertion order), so relying on them would let run order,
  * rollback order and status order drift apart.
  */
-final readonly class Orchestrator implements RunsMigrations
+final readonly class Orchestrator implements RunsMigrationsWithReporter
 {
     public function __construct(
         private TracksMigrations $storage,
         private DiscoversMigrations $finder,
         private ExecutesMigrations $executor,
+        private ReportsMigrations $reporter = new NullReporter(),
     ) {
     }
 
     /**
      * Execute all pending migrations.
      *
+     * @param ReportsMigrations|null $reporter Optional reporter used for this call only,
+     *        overriding the one given to the constructor. Handy when the reporter depends on
+     *        per-invocation state (e.g. a console OutputInterface), so the runner itself can
+     *        still be a plain, reusable service. When null, the constructor's reporter
+     *        (a NullReporter by default) is used.
      * @return MigrationRun[] The migrations that were executed.
      */
-    public function run(): array
+    public function run(?ReportsMigrations $reporter = null): array
     {
+        $reporter ??= $this->reporter;
+
         // Collect the pending set and order it here. The finder's own order is not
         // trusted: ordering is decided in one place only, so a finder implementation
         // cannot put run order out of step with rollback and status order.
@@ -65,15 +74,23 @@ final readonly class Orchestrator implements RunsMigrations
 
         $executed = [];
         foreach ($pending as $migration) {
-            $start = microtime(true);
-            $this->executor->execute($migration, Direction::Up);
-            $end = microtime(true);
+            $reporter->starting($migration, Direction::Up);
+            try {
+                $start = microtime(true);
+                $this->executor->execute($migration, Direction::Up);
+                $end = microtime(true);
+            } catch (Throwable $e) {
+                $reporter->failed($migration, Direction::Up, $e);
+                throw $e;
+            }
 
             $this->storage->markApplied($migration->id());
-            $executed[] = new MigrationRun(
+            $run = new MigrationRun(
                 $migration,
                 $end - $start,
             );
+            $executed[] = $run;
+            $reporter->finished($run, Direction::Up);
         }
 
         return $executed;
@@ -82,11 +99,14 @@ final readonly class Orchestrator implements RunsMigrations
     /**
      * Roll back the last $steps migrations.
      *
+     * @param ReportsMigrations|null $reporter Optional per-call reporter — see run().
      * @return MigrationRun[] The migrations that were rolled back.
      * @throws MigrationNotFoundException if a recorded migration cannot be found on disk.
      */
-    public function rollback(int $steps = 1): array
+    public function rollback(int $steps = 1, ?ReportsMigrations $reporter = null): array
     {
+        $reporter ??= $this->reporter;
+
         // Order the history most-recent-first here, then take the first $steps entries.
         $targets = array_slice($this->appliedDescending(), 0, max($steps, 0));
 
@@ -97,15 +117,23 @@ final readonly class Orchestrator implements RunsMigrations
         foreach ($targets as $entry) {
             $migration = $available[$entry->id()];
 
-            $start = microtime(true);
-            $this->executor->execute($migration, Direction::Down);
-            $end = microtime(true);
+            $reporter->starting($migration, Direction::Down);
+            try {
+                $start = microtime(true);
+                $this->executor->execute($migration, Direction::Down);
+                $end = microtime(true);
+            } catch (Throwable $e) {
+                $reporter->failed($migration, Direction::Down, $e);
+                throw $e;
+            }
 
             $this->storage->markReverted($migration->id());
-            $reverted[] = new MigrationRun(
+            $run = new MigrationRun(
                 $migration,
                 $end - $start,
             );
+            $reverted[] = $run;
+            $reporter->finished($run, Direction::Down);
         }
 
         return $reverted;
