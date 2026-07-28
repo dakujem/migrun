@@ -122,9 +122,29 @@ final readonly class LockingOrchestrator implements RunsMigrationsWithReporter
         return $this->mutex->withLock(fn() => $this->inner->run($reporter));
     }
 
+    public function runTo(string $id, ?ReportsMigrations $reporter = null): array
+    {
+        return $this->mutex->withLock(fn() => $this->inner->runTo($id, $reporter));
+    }
+
     public function rollback(int $steps = 1, ?ReportsMigrations $reporter = null): array
     {
         return $this->mutex->withLock(fn() => $this->inner->rollback($steps, $reporter));
+    }
+
+    public function rollbackBefore(string $id, ?ReportsMigrations $reporter = null): array
+    {
+        return $this->mutex->withLock(fn() => $this->inner->rollbackBefore($id, $reporter));
+    }
+
+    public function rollbackAll(?ReportsMigrations $reporter = null): array
+    {
+        return $this->mutex->withLock(fn() => $this->inner->rollbackAll($reporter));
+    }
+
+    public function rollbackExactly(array $orderedIds, ?ReportsMigrations $reporter = null): array
+    {
+        return $this->mutex->withLock(fn() => $this->inner->rollbackExactly($orderedIds, $reporter));
     }
 
     public function status(): array
