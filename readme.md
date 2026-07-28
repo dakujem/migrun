@@ -11,6 +11,8 @@ No framework lock-in. No config files. Any database.
 >
 > 💿 `composer require dakujem/migrun`
 >
+> 📒 [Changelog](changelog.md)
+>
 
 
 ## What is Migrun?
@@ -108,47 +110,9 @@ v001.php  v002.php  v009.php  v010.php  →  runs as  v001, v002, v009, v010   �
 The same applies to `rel-1`, `step_1`, `2024-1`, and any other scheme with an unpadded number
 anywhere in the name. **Pad the digits.**
 
-<details>
-<summary>Already using unpadded, purely numeric IDs? (migration required)</summary>
-
-Migrun 1.0.1 fixed the ID comparison. Previously IDs were compared with PHP's `<=>`, which
-compares two numeric strings as *numbers* — so files named `1.php` … `10.php` happened to run in
-numeric order. They now run in byte order (`1, 10, 2, 9`).
-
-This affects only IDs that are **entirely** numeric. `v1`/`v10` and `1_create_users`/`10_add_orders`
-are not numeric strings, so they were always compared byte-wise and are unchanged (they were
-already running in the "wrong" order — padding fixes that too).
-
-The remedy is to **rename the files with padding**. Because the ID *is* the filename stem, renaming
-changes the ID, so the history has to be updated in the same breath. Otherwise the renamed
-migrations look pending (and re-run), while the old IDs show up as `MISSING`:
-
-```php
-use Dakujem\Migrun\Storage\PdoStorage;
-
-$storage = new PdoStorage($pdo);
-
-// old ID => new ID, after renaming the files on disk
-$renamed = ['1' => '001', '2' => '002', '9' => '009', '10' => '010'];
-
-foreach ($storage->getApplied() as $entry) {
-    if (isset($renamed[$entry->id()])) {
-        $storage->markApplied($renamed[$entry->id()], $entry->at()); // keep the original timestamp
-        $storage->markReverted($entry->id());
-    }
-}
-```
-
-Run this once, with the files already renamed and **no pending migrations outstanding**. Take a
-backup of the history first — verify with `status` that everything reads `up` afterwards.
-
-There is deliberately no switch to restore the old comparison. It was not a valid ordering to
-begin with: distinct IDs could compare *equal* (`'9'` vs `'09'`, `'100'` vs `'1e2'`), and it was
-not transitive once numeric and non-numeric IDs were mixed — with `'2'`, `'10'` and `'1a'`,
-`'2' < '10'` and `'10' < '1a'` yet `'1a' < '2'`. PHP's sort functions give undefined results for
-such a comparison, so preserving it would only preserve the bug. Zero-padding is the fix.
-
-</details>
+> ⚠️ **Upgrading from 1.0 with plain numeric filenames** (`1.php`, `2.php`, … `10.php`)?
+> The ID comparison was fixed in 1.0.1 and their order changed.
+> See the [changelog](changelog.md#v101) for what to do.
 
 
 ### Migration format A — anonymous class (up + down)
