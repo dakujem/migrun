@@ -42,6 +42,6 @@
     "test:ci": "Run application tests, provide configuration options as needed."
   },
   "archive": {
-    "exclude": ["/tests", "/.github"]
+    "exclude": ["/tests", "/.github", "/examples"]
   }
 }

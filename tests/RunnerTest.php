@@ -576,6 +576,64 @@ final class RunnerTest extends TestCase
         self::assertInstanceOf(RunsMigrations::class, $runner);
     }
 
+    public function testOrchestratorImplementsRunsMigrationsWithReporter(): void
+    {
+        $runner = new Orchestrator(new SpyStorage(), $this->stubFinder([]), new SpyExecutor());
+
+        self::assertInstanceOf(\Dakujem\Migrun\RunsMigrationsWithReporter::class, $runner);
+        // The reporting-aware contract extends the base one, so it satisfies both.
+        self::assertInstanceOf(RunsMigrations::class, $runner);
+    }
+
+    /**
+     * A decorator typed against RunsMigrationsWithReporter must be able to forward a
+     * reporter through the interface — this is the seam that plain RunsMigrations cannot
+     * express, because its run()/rollback() do not declare the parameter.
+     */
+    public function testReporterCanBeForwardedThroughTheReportingInterface(): void
+    {
+        $m1 = $this->migration('20240101_120000_alpha');
+        $reporter = new SpyReporter();
+
+        $inner = new Orchestrator(new SpyStorage([]), $this->stubFinder([$m1]), new SpyExecutor());
+
+        // A minimal pass-through decorator, typed against the reporting-aware contract.
+        $decorator = new class($inner) implements \Dakujem\Migrun\RunsMigrationsWithReporter {
+            public function __construct(private \Dakujem\Migrun\RunsMigrationsWithReporter $inner) {}
+
+            public function run(?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
+            {
+                return $this->inner->run($reporter);
+            }
+
+            public function rollback(int $steps = 1, ?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
+            {
+                return $this->inner->rollback($steps, $reporter);
+            }
+
+            public function status(): array
+            {
+                return $this->inner->status();
+            }
+        };
+
+        $executed = $decorator->run($reporter);
+
+        self::assertCount(1, $executed);
+        // The reporter survived the hop through the decorator.
+        self::assertSame(
+            [
+                ['starting', $m1->id(), Direction::Up],
+                ['finished', $m1->id(), Direction::Up],
+            ],
+            $reporter->events,
+        );
+
+        // The decorator is still usable wherever the base contract is expected.
+        $wrap = static fn(RunsMigrations $r): RunsMigrations => $r;
+        self::assertInstanceOf(RunsMigrations::class, $wrap($decorator));
+    }
+
     public function testRunsMigrationsContractIsUsableThroughTheInterfaceType(): void
     {
         $m1 = $this->migration('20240101_120000_alpha');

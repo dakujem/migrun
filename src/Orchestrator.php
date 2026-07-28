@@ -31,7 +31,7 @@ use Throwable;
  *        - file only        → Pending  (appliedAt null, path set)
  *        - history only     → Missing  (appliedAt set, path null)
  */
-final readonly class Orchestrator implements RunsMigrations
+final readonly class Orchestrator implements RunsMigrationsWithReporter
 {
     public function __construct(
         private TracksMigrations $storage,
