@@ -24,9 +24,33 @@ interface RunsMigrationsWithReporter extends RunsMigrations
     public function run(?ReportsMigrations $reporter = null): array;
 
     /**
-     * @param ReportsMigrations|null $reporter Reporter for this call only; when null the
-     *        implementation's own default (if any) is used.
+     * @param ReportsMigrations|null $reporter Reporter for this call only — see run().
+     * @return MigrationRun[] The migrations that were executed.
+     */
+    public function runTo(string $id, ?ReportsMigrations $reporter = null): array;
+
+    /**
+     * @param ReportsMigrations|null $reporter Reporter for this call only — see run().
      * @return MigrationRun[] The migrations that were rolled back.
      */
     public function rollback(int $steps = 1, ?ReportsMigrations $reporter = null): array;
+
+    /**
+     * @param ReportsMigrations|null $reporter Reporter for this call only — see run().
+     * @return MigrationRun[] The migrations that were rolled back.
+     */
+    public function rollbackBefore(string $id, ?ReportsMigrations $reporter = null): array;
+
+    /**
+     * @param ReportsMigrations|null $reporter Reporter for this call only — see run().
+     * @return MigrationRun[] The migrations that were rolled back.
+     */
+    public function rollbackAll(?ReportsMigrations $reporter = null): array;
+
+    /**
+     * @param string[] $orderedIds Migrations to revert, in the order they should be reverted.
+     * @param ReportsMigrations|null $reporter Reporter for this call only — see run().
+     * @return MigrationRun[] The migrations that were rolled back.
+     */
+    public function rollbackExactly(array $orderedIds, ?ReportsMigrations $reporter = null): array;
 }

@@ -43,16 +43,20 @@ Migrations are ordered by their ID — the filename stem (the path relative to t
 directory, without the `.php` extension).
 **The order in which migrations run is therefore determined entirely by the filename.**
 
-Ordering is **lexicographic**: IDs are compared byte by byte, exactly as `LC_ALL=C sort` or
-git would compare them. It is deterministic and identical on every platform, filesystem and
-locale. One rule governs everything — the order pending migrations run in, the order applied
-ones are rolled back, and the order `status` lists them.
+IDs are compared **lexicographically** — byte by byte, exactly as `LC_ALL=C sort` or git would
+compare them. It is deterministic and identical on every platform, filesystem and locale. This
+one comparison decides the order pending migrations run in and the order `status` lists them.
 
 > ⚠️ **Digits are compared as characters, not as numbers.**
 > Byte-wise `'10'` comes **before** `'9'`, because `'1'` comes before `'9'`.
 
 This matters only when a number in the filename varies in width. See
 [Numbering your migrations](#numbering-your-migrations) below.
+
+> **Rollback is the one exception.** Migrations are reverted in reverse order of *application*
+> rather than of ID, so that "roll back the last one" undoes what was actually done last. The two
+> coincide unless a migration was applied out of order — see
+> [Rollback order follows application order](#rollback-order-follows-application-order).
 
 
 ### Recommended naming convention
@@ -337,6 +341,87 @@ foreach ($executed as $migration) {
 // Roll back the last migration
 // $reverted = $orchestrator->rollback(1);
 ```
+
+
+## Running and rolling back
+
+Every method returns `MigrationRun[]` — the migrations it actually executed, each carrying its
+measured duration.
+
+| Method | Does |
+|---|---|
+| `run()` | Applies every pending migration. |
+| `runTo($id)` | Applies pending migrations up to **and including** `$id`; later ones stay pending. |
+| `rollback($steps = 1)` | Reverts the `$steps` **most recently applied** migrations. |
+| `rollbackBefore($id)` | Reverts `$id` **and everything applied after it**, leaving the state before `$id`. |
+| `rollbackAll()` | Reverts everything applied. |
+| `rollbackExactly($ids)` | Reverts exactly the named migrations, in the order given. |
+| `status()` | Reports every known migration, ascending by ID. |
+
+One rule ties the targeted methods together:
+
+> **The migration you name is always acted upon.**
+> `runTo($id)` applies it, `rollbackBefore($id)` reverts it, `rollbackExactly([$id])` reverts it.
+
+So picking the newest applied migration in a UI and calling `rollbackBefore()` reverts exactly that
+one — never a no-op.
+
+### Rollback order follows application order
+
+This matters, so it is worth being explicit: **rollback proceeds in reverse order of *application*,
+not of ID.** "Roll back the last migration" means the one applied most recently, which is not
+necessarily the one with the highest ID.
+
+Consider a branch merged into a database that already had newer migrations applied:
+
+```
+0001_create_users     applied 2026-07-01 09:00
+0002_add_widget       applied 2026-07-28 14:22   ← applied LAST, despite the lower ID
+0003_add_orders       applied 2026-07-05 11:30
+```
+
+`rollback(1)` reverts `0002_add_widget` — the migration you actually applied last — rather than
+`0003_add_orders`, which belongs to someone else. Reverse-application order also unwinds the schema
+in the exact reverse of how it was built, so each `down()` runs against the state its `up()` produced.
+
+**In the normal case the two orders are the same thing** — they diverge only when a migration was
+applied out of order, as above. `status()` lists ascending by ID while showing each `applied_at`, so
+that situation shows up as a non-monotonic timestamp column: the quickest way to spot it before
+rolling anything back.
+
+`rollbackBefore($id)` chooses its *set* by ID — the same byte-wise comparison `status()` lists by, so
+it is exactly "this entry and everything below it" — but reverts that set in application order. Use
+`rollbackExactly()` when you need to control the sequence yourself.
+
+### Reverting specific migrations
+
+`rollbackExactly()` is the escape hatch for the branch workflow: revert your own migration while
+newer ones from elsewhere stay applied.
+
+```php
+// Undo just this one, out of the middle of the history.
+$runner->rollbackExactly(['20260701_120000_add_widget']);
+```
+
+It imposes no ordering of its own — migrations are reverted in the order the array lists them. A
+status listing is ascending by ID, which is the **opposite** of a sensible rollback order, so reverse
+it first:
+
+```php
+$displayed = ['0002_add_widget', '0003_add_orders'];   // as shown, top to bottom
+$runner->rollbackExactly($displayed);                  // ❌ reverts 0002 before 0003
+$runner->rollbackExactly(array_reverse($displayed));   // ✅ newest first
+```
+
+Reverting out of order **deliberately leaves a gap**: the migration becomes pending again, and a
+later `run()` re-applies it at its ID position — therefore *after* migrations with higher IDs. Migrun
+supports this (it has always tolerated gaps, since each migration is tracked individually rather than
+by a high-water mark), but whether it is safe for your schema is your call. A migration that ran
+against a newer schema may not revert cleanly against an older one.
+
+`rollbackBefore()` and `rollbackExactly()` throw `MigrationNotAppliedException` if a named migration
+is not currently applied, and `runTo()` throws `MigrationNotFoundException` for an unknown target —
+a mistyped or truncated ID must never silently act on a different set.
 
 
 ## Running from the CLI

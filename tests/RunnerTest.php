@@ -618,9 +618,29 @@ final class RunnerTest extends TestCase
                 return $this->inner->run($reporter);
             }
 
+            public function runTo(string $id, ?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
+            {
+                return $this->inner->runTo($id, $reporter);
+            }
+
             public function rollback(int $steps = 1, ?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
             {
                 return $this->inner->rollback($steps, $reporter);
+            }
+
+            public function rollbackBefore(string $id, ?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
+            {
+                return $this->inner->rollbackBefore($id, $reporter);
+            }
+
+            public function rollbackAll(?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
+            {
+                return $this->inner->rollbackAll($reporter);
+            }
+
+            public function rollbackExactly(array $orderedIds, ?\Dakujem\Migrun\ReportsMigrations $reporter = null): array
+            {
+                return $this->inner->rollbackExactly($orderedIds, $reporter);
             }
 
             public function status(): array

@@ -8,7 +8,15 @@ Please report any issues.
 
 ## v1.1
 
-Live progress reporting, and interfaces for the runner.
+Targeted runs and rollbacks, live progress reporting, and interfaces for the runner.
+
+**Targeted runs and rollbacks.** Alongside `run()` and `rollback($steps)` there are now
+`runTo($id)`, `rollbackBefore($id)`, `rollbackAll()` and `rollbackExactly($ids)`. The rule is that
+the migration you name is always acted upon: `runTo()` applies it, `rollbackBefore()` reverts it
+together with everything applied after it. `rollbackExactly()` reverts precisely the migrations you
+list, in the order you list them — the escape hatch for undoing a branch's migration while newer
+ones stay applied. See [Running and rolling back](readme.md#running-and-rolling-back) in the readme,
+which also documents why rollbacks follow *application* order rather than ID order.
 
 A runner can now be given a **reporter** (`ReportsMigrations`) that is called around each migration as
 it runs, so a CLI or web script can display progress instead of waiting for the whole batch to
