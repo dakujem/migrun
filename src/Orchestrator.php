@@ -10,14 +10,14 @@ use Dakujem\Migrun\Exception\MigrationNotFoundException;
  * Orchestrates the full migration run or rollback cycle:
  *
  *   run():
- *     1. Ask storage for the list of already-ran migration IDs.
- *     2. Ask finder for all available migrations (sorted ascending).
- *     3. Filter to pending migrations (not yet ran).
+ *     1. Ask finder for all available migrations.
+ *     2. Filter to pending migrations (not yet ran), asking storage for each.
+ *     3. Order them ascending by ID.
  *     4. Execute each pending migration via the executor.
  *     5. Record each successful execution in storage immediately.
  *
  *   rollback(int $steps):
- *     1. Ask storage for applied migrations (most-recent-first order).
+ *     1. Ask storage for applied migrations and order them most-recent-first here.
  *     2. Ask finder for all available migrations.
  *     3. For each of the last $steps applied migrations, execute Down and remove from storage.
  *
@@ -29,6 +29,12 @@ use Dakujem\Migrun\Exception\MigrationNotFoundException;
  *        - present in both  → Applied  (appliedAt set, path set)
  *        - file only        → Pending  (appliedAt null, path set)
  *        - history only     → Missing  (appliedAt set, path null)
+ *
+ * The orchestrator owns ordering entirely. Migration IDs are always compared byte by
+ * byte (strcmp), and both the finder's output and the storage's history are sorted here
+ * rather than trusted as received — collaborators differ (SQL sorts by its own
+ * collation, the JSON file by insertion order), so relying on them would let run order,
+ * rollback order and status order drift apart.
  */
 final readonly class Orchestrator
 {
@@ -46,14 +52,19 @@ final readonly class Orchestrator
      */
     public function run(): array
     {
-        $all = $this->finder->list();
+        // Collect the pending set and order it here. The finder's own order is not
+        // trusted: ordering is decided in one place only, so a finder implementation
+        // cannot put run order out of step with rollback and status order.
+        $pending = [];
+        foreach ($this->finder->list() as $migration) {
+            if (!$this->storage->isApplied($migration->id())) {
+                $pending[] = $migration;
+            }
+        }
+        usort($pending, fn(MigrationFile $a, MigrationFile $b) => strcmp($a->id(), $b->id()));
 
         $executed = [];
-        foreach ($all as $migration) {
-            if ($this->storage->isApplied($migration->id())) {
-                continue;
-            }
-
+        foreach ($pending as $migration) {
             $start = microtime(true);
             $this->executor->execute($migration, Direction::Up);
             $end = microtime(true);
@@ -76,14 +87,8 @@ final readonly class Orchestrator
      */
     public function rollback(int $steps = 1): array
     {
-        // Storage returns most-recent-first; collect only the first $steps entries.
-        $targets = [];
-        foreach ($this->storage->getApplied() as $entry) {
-            if (count($targets) >= $steps) {
-                break;
-            }
-            $targets[] = $entry;
-        }
+        // Order the history most-recent-first here, then take the first $steps entries.
+        $targets = array_slice($this->appliedDescending(), 0, max($steps, 0));
 
         // Resolve only the migrations we actually need, rather than listing everything
         $available = $this->finder->find($targets);
@@ -130,9 +135,11 @@ final readonly class Orchestrator
             $files[$migration->id()] = $migration;
         }
 
-        // Merge all known IDs and sort ascending
-        $ids = array_keys($history + $files);
-        sort($ids);
+        // Merge all known IDs and sort ascending.
+        // array_keys() casts numeric-string IDs (e.g. "9") to int, so cast them back
+        // before comparing — MigrationStatusEntry::$id is a string.
+        $ids = array_map('strval', array_keys($history + $files));
+        usort($ids, fn(string $a, string $b) => strcmp($a, $b));
 
         $entries = [];
         foreach ($ids as $id) {
@@ -150,6 +157,38 @@ final readonly class Orchestrator
                 path: $onDisk ? $files[$id]->path() : null,
             );
         }
+
+        return $entries;
+    }
+
+    // -------------------------------------------------------------------------
+
+    /**
+     * The applied history, most-recently-applied first.
+     *
+     * Ordering is imposed here rather than taken from the storage: backends differ
+     * (SQL sorts by its own collation, the JSON file by insertion order), so relying
+     * on them would make rollback order depend on which storage is configured.
+     *
+     * Sorted by timestamp descending, then by ID descending — byte-wise, matching the
+     * finder. The ID is a genuine tiebreaker rather than a formality: timestamps are
+     * recorded with one-second precision, so a single run() typically stamps several
+     * migrations identically.
+     *
+     * @return MigrationHistoryEntry[]
+     */
+    private function appliedDescending(): array
+    {
+        $entries = [];
+        foreach ($this->storage->getApplied() as $entry) {
+            $entries[] = $entry;
+        }
+
+        usort(
+            $entries,
+            fn(MigrationHistoryEntry $a, MigrationHistoryEntry $b) => ($b->at() <=> $a->at())
+                ?: strcmp($b->id(), $a->id()),
+        );
 
         return $entries;
     }

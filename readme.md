@@ -11,6 +11,8 @@ No framework lock-in. No config files. Any database.
 >
 > 💿 `composer require dakujem/migrun`
 >
+> 📒 [Changelog](changelog.md)
+>
 
 
 ## What is Migrun?
@@ -37,9 +39,20 @@ This is a distinction compared to other migration runners.
 
 ### Execution order
 
-The built-in `DirectoryFinder` sorts migrations lexicographically by their ID,
-which is the filename stem (the path relative to the migrations directory, without the `.php` extension).
+Migrations are ordered by their ID — the filename stem (the path relative to the migrations
+directory, without the `.php` extension).
 **The order in which migrations run is therefore determined entirely by the filename.**
+
+Ordering is **lexicographic**: IDs are compared byte by byte, exactly as `LC_ALL=C sort` or
+git would compare them. It is deterministic and identical on every platform, filesystem and
+locale. One rule governs everything — the order pending migrations run in, the order applied
+ones are rolled back, and the order `status` lists them.
+
+> ⚠️ **Digits are compared as characters, not as numbers.**
+> Byte-wise `'10'` comes **before** `'9'`, because `'1'` comes before `'9'`.
+
+This matters only when a number in the filename varies in width. See
+[Numbering your migrations](#numbering-your-migrations) below.
 
 
 ### Recommended naming convention
@@ -57,15 +70,52 @@ Examples:
 20240115_093000_add_email_index.php
 ```
 
-With this convention, lexicographic and chronological order coincide.
-Any other stable, monotonically increasing prefix (a sequential number, a date-only stamp, etc.)
-works just as well — pick whatever your team finds clearest.
+Every timestamp is the same width, so lexicographic and chronological order coincide. This is
+the recommended scheme precisely because it cannot run into the numbering pitfall below.
 
 > The timestamp in the filename is purely for ordering.
 > The history storage records the time the migration *ran*, not the time encoded in the filename.
 
 
-### Format A — anonymous class (up + down)
+### Numbering your migrations
+
+If you prefer plain version numbers to timestamps, **zero-pad them to a fixed width**:
+
+```
+0001_create_users.php         ✅ correct
+0002_add_email_index.php
+0009_backfill_slugs.php
+0010_add_orders.php
+```
+
+```
+1_create_users.php            ❌ wrong order once you reach 10
+2_add_email_index.php
+9_backfill_slugs.php
+10_add_orders.php             ← runs FIRST, before 1_create_users
+```
+
+Unpadded numbers sort as `1, 10, 2, 9` — so the tenth migration runs before the second.
+Pad wide enough for the number of migrations you expect (three digits gets you to 999).
+Using 6 digits is not an overkill but a precaution.
+
+**A prefix does not help.** The comparison is still byte-wise, so `v1 … v10` breaks in exactly
+the same way:
+
+```
+v1.php  v2.php  v9.php  v10.php     →  runs as  v1, v10, v2, v9     ❌
+v001.php  v002.php  v009.php  v010.php  →  runs as  v001, v002, v009, v010   ✅
+```
+
+The same applies to `rel-1`, `step_1`, `2024-1`, and any other scheme with an unpadded number
+anywhere in the name. **Pad the digits.**
+
+> ⚠️ **Upgrading from 1.0 with plain numeric filenames** (`1.php`, `2.php`, … `10.php`)?
+> The ID comparison was fixed in 1.0.1 and their order changed.
+> See the [changelog](changelog.md#v101) for what to do.
+
+
+### Migration format A — anonymous class (up + down)
 
 The file **returns** an anonymous class with `up()` and `down()` methods. No interface required.
 Typed parameters are autowired from the PSR-11 container by class name (when using `ContainerInvoker`).
@@ -91,7 +141,7 @@ return new class
 ```
 
 
-### Format B — anonymous class (up only)
+### Migration format B — anonymous class (up only)
 
 The file **returns** an anonymous class with an `up()` method only. Rollback is not supported.
 
@@ -111,7 +161,7 @@ return new class
 ```
 
 
-### Format C — callable (up only)
+### Migration format C — callable (up only)
 
 The file **returns** a callable. Rollback is not supported.
 
@@ -129,7 +179,7 @@ return function (PDO $db): void {
 > **Edge case:** if a returned object has both a public `up()` method and is itself callable (i.e. defines `__invoke`), `up()` takes precedence and `__invoke` is never used.
 
 
-### Format D — interface-based anonymous class
+### Migration format D — interface-based anonymous class
 
 For projects that prefer explicit contracts, the file may return an instance implementing `Migration` or `ReversibleMigration`.
 Behaviour is identical to returning a class defining either just the `up` method or both the `up` and `down` methods.
@@ -617,6 +667,15 @@ final class RedisStorage implements TracksMigrations
 ### Custom finder
 
 Implement `DiscoversMigrations` to customize the way migrations are discovered (filtering, multiple directories, etc.).
+
+**Ordering is not your concern.** `Orchestrator` sorts whatever `list()` returns, comparing IDs
+byte by byte, so a finder cannot put run order out of step with rollback or `status` order. Return
+files in any order you like. `DirectoryFinder` still sorts its own output, for the benefit of code
+that uses the finder directly.
+
+The same holds for storage: the orchestrator orders the migration history itself rather than
+trusting a database collation or a file's insertion order. There is exactly one ordering rule in
+the library, applied in one place.
 
 
 ### Custom invoker
