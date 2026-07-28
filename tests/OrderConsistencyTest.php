@@ -10,7 +10,6 @@ use Dakujem\Migrun\Finder\DirectoryFinder;
 use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationRun;
 use Dakujem\Migrun\MigrationStatusEntry;
-use Dakujem\Migrun\NumericOrder;
 use Dakujem\Migrun\Orchestrator;
 use Dakujem\Migrun\Storage\JsonFileStorage;
 use Dakujem\Migrun\Storage\PdoStorage;
@@ -23,10 +22,10 @@ use PHPUnit\Framework\TestCase;
  * Run order, rollback order and status order must agree with each other, and must be
  * identical across storage backends.
  *
- * Before v1.1 they could not: the finder compared IDs with `<=>`, status() sorted with
+ * Before 1.0.1 they could not: the finder compared IDs with `<=>`, status() sorted with
  * sort(), and each storage imposed its own history order (SQL by collation, the JSON
- * file by insertion order). Ordering is now decided solely by the injected
- * OrdersMigrations comparison.
+ * file by insertion order). The orchestrator now sorts everything it consumes itself,
+ * comparing IDs byte by byte.
  */
 final class OrderConsistencyTest extends TestCase
 {
@@ -201,37 +200,47 @@ final class OrderConsistencyTest extends TestCase
     }
 
     /**
-     * Swapping the comparison must move run, rollback and status order together —
-     * a half-applied override would reintroduce the inconsistency being fixed.
+     * The orchestrator owns ordering: a finder that returns files in some other order
+     * must not be able to put run order out of step with rollback and status order.
      */
-    public function testSwappingTheOrderAffectsRunRollbackAndStatusAlike(): void
+    public function testFinderOrderCannotOverrideTheOrchestratorsOrder(): void
     {
-        $ids = ['2', '9', '10'];
+        $ids = ['001_a', '002_b', '009_c', '010_d'];
         $this->makeFiles($ids);
 
-        $legacy = new NumericOrder();
-        $storage = new JsonFileStorage($this->dir . '/.migrun/history.json');
-        $executor = $this->recordingExecutor();
+        // A finder that deliberately hands back files in the worst possible order.
+        $shuffling = new class ($this->dir) implements \Dakujem\Migrun\DiscoversMigrations {
+            public function __construct(private string $dir) {}
 
+            public function list(): iterable
+            {
+                $files = iterator_to_array((new DirectoryFinder($this->dir))->list(), false);
+                return array_reverse($files); // descending — the opposite of run order
+            }
+
+            public function find(array $migrations): array
+            {
+                return (new DirectoryFinder($this->dir))->find($migrations);
+            }
+        };
+
+        $executor = $this->recordingExecutor();
         $runner = new Orchestrator(
-            $storage,
-            new DirectoryFinder($this->dir, false, $legacy),
+            new JsonFileStorage($this->dir . '/.migrun/history.json'),
+            $shuffling,
             $executor,
-            order: $legacy,
         );
 
         $statusOrder = array_map(fn(MigrationStatusEntry $e) => $e->id, $runner->status());
-
         $executed = $runner->run();
-        $runOrder = array_map(fn(MigrationRun $r) => $r->id(), $executed);
+
+        // Ascending regardless of what the finder returned.
+        self::assertSame($ids, array_map(fn(MigrationRun $r) => $r->id(), $executed));
+        self::assertSame($ids, $executor->ids);
+        self::assertSame($ids, $statusOrder);
 
         $executor->ids = [];
-        $runner->rollback(3);
-        $rollbackOrder = $executor->ids;
-
-        // Numeric ordering: 2, 9, 10 (byte order would be 10, 2, 9).
-        self::assertSame(['2', '9', '10'], $runOrder);
-        self::assertSame(['2', '9', '10'], $statusOrder);
-        self::assertSame(['10', '9', '2'], $rollbackOrder);
+        $runner->rollback(count($ids));
+        self::assertSame(array_reverse($ids), $executor->ids);
     }
 }

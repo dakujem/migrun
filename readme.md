@@ -109,11 +109,17 @@ The same applies to `rel-1`, `step_1`, `2024-1`, and any other scheme with an un
 anywhere in the name. **Pad the digits.**
 
 <details>
-<summary>Already using unpadded numeric IDs?</summary>
+<summary>Already using unpadded, purely numeric IDs? (migration required)</summary>
 
-Two options.
+Migrun 1.0.1 fixed the ID comparison. Previously IDs were compared with PHP's `<=>`, which
+compares two numeric strings as *numbers* — so files named `1.php` … `10.php` happened to run in
+numeric order. They now run in byte order (`1, 10, 2, 9`).
 
-**Preferred — rename the files with padding.** Because the ID *is* the filename stem, renaming
+This affects only IDs that are **entirely** numeric. `v1`/`v10` and `1_create_users`/`10_add_orders`
+are not numeric strings, so they were always compared byte-wise and are unchanged (they were
+already running in the "wrong" order — padding fixes that too).
+
+The remedy is to **rename the files with padding**. Because the ID *is* the filename stem, renaming
 changes the ID, so the history has to be updated in the same breath. Otherwise the renamed
 migrations look pending (and re-run), while the old IDs show up as `MISSING`:
 
@@ -136,24 +142,11 @@ foreach ($storage->getApplied() as $entry) {
 Run this once, with the files already renamed and **no pending migrations outstanding**. Take a
 backup of the history first — verify with `status` that everything reads `up` afterwards.
 
-**Or keep the old ordering.** Pass `NumericOrder` to compare IDs as numbers, as versions before
-1.1 did — no renaming needed:
-
-```php
-use Dakujem\Migrun\NumericOrder;
-
-$orchestrator = (new MigrunBuilder())
-    ->directory(__DIR__ . '/migrations')
-    ->ordering(new NumericOrder())
-    ->build();
-```
-
-Be aware of what you are opting into: comparing numeric strings as numbers is not a valid
-ordering. Distinct IDs can compare *equal* (`'9'` vs `'09'`, `'100'` vs `'1e2'`), and the
-comparison is not transitive once numeric and non-numeric IDs are mixed — with `'2'`, `'10'` and
-`'1a'`, `'2' < '10'` and `'10' < '1a'` yet `'1a' < '2'`. PHP's sort functions give undefined
-results for such a comparison. It is safe only if *every* ID is numeric and no two share a
-numeric value. Zero-padding is the real fix.
+There is deliberately no switch to restore the old comparison. It was not a valid ordering to
+begin with: distinct IDs could compare *equal* (`'9'` vs `'09'`, `'100'` vs `'1e2'`), and it was
+not transitive once numeric and non-numeric IDs were mixed — with `'2'`, `'10'` and `'1a'`,
+`'2' < '10'` and `'10' < '1a'` yet `'1a' < '2'`. PHP's sort functions give undefined results for
+such a comparison, so preserving it would only preserve the bug. Zero-padding is the fix.
 
 </details>
 
@@ -312,7 +305,6 @@ Storage defaults to `{migrations-dir}/.migrun/migrun.json` — no extra configur
 ### All builder options
 
 ```php
-use Dakujem\Migrun\LexicographicOrder;
 use Dakujem\Migrun\MigrunBuilder;
 
 $orchestrator = (new MigrunBuilder())
@@ -320,7 +312,6 @@ $orchestrator = (new MigrunBuilder())
     ->container($container)                        // PSR-11 container; omit for no-autowiring mode
     ->pdoStorage($pdo)                             // recommended: history in the same DB as migrations
     ->reporter(new MyReporter())                   // live progress as each migration runs; omit for none
-    ->ordering(new LexicographicOrder())           // migration order; this is the default, omit it
     ->build();
 ```
 
@@ -821,7 +812,6 @@ function migrate(RunsMigrationsWithReporter $runner, ReportsMigrations $reporter
 | Invoke migration callables | `InvokesCallable` | `ContainerInvoker` (PSR-11 autowired), `TrivialInvoker` (no args) |
 | Load and run a migration | `ExecutesMigrations` | `Executor` — delegates to an `InvokesCallable` |
 | Report progress during a run | `ReportsMigrations` | `NullReporter` — no-op default and base class |
-| Define migration order | `OrdersMigrations` | `LexicographicOrder` — byte-by-byte, the default<br>`NumericOrder` — legacy pre-1.1 behaviour |
 | Orchestrate the whole flow | `RunsMigrations`<br>`RunsMigrationsWithReporter` — adds the per-call reporter | `Orchestrator` |
 
 Every part is replaceable. Wire the built-ins for quick setup; swap them out as your project grows.
@@ -895,55 +885,14 @@ final class RedisStorage implements TracksMigrations
 
 Implement `DiscoversMigrations` to customize the way migrations are discovered (filtering, multiple directories, etc.).
 
+**Ordering is not your concern.** `Orchestrator` sorts whatever `list()` returns, comparing IDs
+byte by byte, so a finder cannot put run order out of step with rollback or `status` order. Return
+files in any order you like. `DirectoryFinder` still sorts its own output, for the benefit of code
+that uses the finder directly.
 
-### Custom ordering
-
-Migration order comes from a single `OrdersMigrations` comparison, shared by the finder and the
-orchestrator. Run order, rollback order and `status` order are all derived from it, so they
-cannot disagree — and the storage backend never influences ordering (the orchestrator sorts the
-history itself, rather than relying on a database collation or on insertion order).
-
-Two implementations ship with the library:
-
-```php
-use Dakujem\Migrun\LexicographicOrder;   // default — strcmp, byte by byte
-use Dakujem\Migrun\NumericOrder;         // legacy pre-1.1 behaviour, see the caveats above
-```
-
-Implement the interface for anything else — for example to order by a parsed date rather than
-by the raw string:
-
-```php
-use Dakujem\Migrun\OrdersMigrations;
-
-final readonly class DatePrefixOrder implements OrdersMigrations
-{
-    public function compare(string $idA, string $idB): int
-    {
-        return $this->stamp($idA) <=> $this->stamp($idB)
-            ?: strcmp($idA, $idB); // stable tiebreak for equal dates
-    }
-
-    private function stamp(string $id): int
-    {
-        return (int) (preg_match('/^(\d{8})/', $id, $m) ? $m[1] : 0);
-    }
-}
-```
-
-Wire it via the builder — it reaches both the finder and the orchestrator:
-
-```php
-(new MigrunBuilder())
-    ->directory(__DIR__ . '/migrations')
-    ->ordering(new DatePrefixOrder())
-    ->build();
-```
-
-> **Your comparison must be a total order**: antisymmetric, transitive, and returning `0` only
-> for identical IDs. If two distinct IDs compare equal, or transitivity is broken, PHP's sort
-> functions produce undefined results. Note the `?: strcmp(...)` tiebreak above — without it,
-> two migrations sharing a date would compare equal.
+The same holds for storage: the orchestrator orders the migration history itself rather than
+trusting a database collation or a file's insertion order. There is exactly one ordering rule in
+the library, applied in one place.
 
 
 ### Custom invoker

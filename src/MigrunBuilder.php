@@ -55,7 +55,6 @@ class MigrunBuilder
     protected ?ContainerInterface $container = null;
     protected bool $recursive = true;
     protected ?ReportsMigrations $reporter = null;
-    protected ?OrdersMigrations $order = null;
 
     // Storage slots — at most one may be non-null when build() is called.
     protected ?string $storagePath = null;
@@ -108,23 +107,6 @@ class MigrunBuilder
     public function reporter(?ReportsMigrations $reporter): static
     {
         $this->reporter = $reporter;
-        return $this;
-    }
-
-    /**
-     * The comparison that defines migration order — run order, rollback order and
-     * status order all derive from it.
-     *
-     * Defaults to LexicographicOrder (byte-by-byte, the same rule as `LC_ALL=C sort`).
-     * Pass null to revert to that default.
-     *
-     * Pass NumericOrder only to keep the pre-1.1 ordering in a project whose migration
-     * IDs are unpadded numbers; see the class docblock for its caveats. The better fix
-     * is to zero-pad the IDs.
-     */
-    public function ordering(?OrdersMigrations $order): static
-    {
-        $this->order = $order;
         return $this;
     }
 
@@ -203,12 +185,8 @@ class MigrunBuilder
             throw new LogicException('A migrations directory must be set via directory() before calling build().');
         }
 
-        // One comparison shared by the finder and the orchestrator, so that run order,
-        // rollback order and status order cannot drift apart.
-        $order = $this->order ?? new LexicographicOrder();
-
         $storage = $this->buildStorage();
-        $finder = new DirectoryFinder($this->directory, $this->recursive, $order);
+        $finder = new DirectoryFinder($this->directory, $this->recursive);
         $invoker = $this->container !== null
             ? new ContainerInvoker($this->container)
             : new TrivialInvoker();
@@ -219,7 +197,6 @@ class MigrunBuilder
             $finder,
             $executor,
             $this->reporter ?? new NullReporter(),
-            $order,
         );
     }
 

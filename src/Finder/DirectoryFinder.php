@@ -6,10 +6,8 @@ namespace Dakujem\Migrun\Finder;
 
 use Dakujem\Migrun\DiscoversMigrations;
 use Dakujem\Migrun\Exception\MigrationNotFoundException;
-use Dakujem\Migrun\LexicographicOrder;
 use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
-use Dakujem\Migrun\OrdersMigrations;
 use FilesystemIterator;
 use Iterator;
 use RecursiveDirectoryIterator;
@@ -32,13 +30,15 @@ use SplFileInfo;
  * it includes the relative subdirectory path using the system directory
  * separator (e.g. "2024/01/20240101_120000_create_users").
  *
- * Results are sorted ascending by ID using the injected OrdersMigrations
- * comparison — by default LexicographicOrder, i.e. a byte-by-byte comparison.
- * With the recommended timestamp-prefixed naming, this naturally produces
- * chronological order. The finder never parses or interprets the filename.
+ * Results are sorted ascending by ID, compared byte by byte (strcmp) — the same
+ * rule as `LC_ALL=C sort`. It is deterministic and identical on every platform,
+ * filesystem and locale. With the recommended timestamp-prefixed naming this
+ * naturally produces chronological order. The finder never parses or interprets
+ * the filename.
  *
- * Note that byte-wise, '10' sorts BEFORE '9'. Zero-pad numeric IDs to a fixed
- * width (001, 002, … 010) so that byte order matches numeric order.
+ * Note that digits are compared as characters, not as numbers: byte-wise '10'
+ * sorts BEFORE '9'. Zero-pad numeric IDs to a fixed width (001, 002, … 010) so
+ * that byte order and numeric order coincide.
  *
  * When $recursive is true, subdirectories are scanned as well. Sorting still
  * produces a single globally-ordered list across all subdirectories.
@@ -48,7 +48,6 @@ final readonly class DirectoryFinder implements DiscoversMigrations
     public function __construct(
         private string $directory,
         private bool $recursive = false,
-        private OrdersMigrations $order = new LexicographicOrder(),
     ) {
     }
 
@@ -57,9 +56,12 @@ final readonly class DirectoryFinder implements DiscoversMigrations
         $scan = $this->scan();
         $migrations = !is_array($scan) ? iterator_to_array($scan) : $scan;
 
+        // strcmp, not <=>: PHP compares two numeric strings as numbers, which is neither
+        // a total order ('9' and '09' compare equal) nor transitive once numeric and
+        // non-numeric IDs are mixed — both of which make the sort result undefined.
         usort(
             $migrations,
-            fn(MigrationFile $a, MigrationFile $b) => $this->order->compare($a->id(), $b->id()),
+            fn(MigrationFile $a, MigrationFile $b) => strcmp($a->id(), $b->id()),
         );
 
         return $migrations;
