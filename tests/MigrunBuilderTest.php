@@ -500,6 +500,50 @@ final class MigrunBuilderTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Ordering
+    // -------------------------------------------------------------------------
+
+    public function testDefaultOrderIsLexicographic(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->build();
+
+        self::assertInstanceOf(
+            \Dakujem\Migrun\LexicographicOrder::class,
+            $this->prop($orchestrator, 'order'),
+        );
+    }
+
+    /** The finder and the orchestrator must share one comparison, or orders could drift. */
+    public function testConfiguredOrderIsWiredIntoBothFinderAndOrchestrator(): void
+    {
+        $order = new \Dakujem\Migrun\NumericOrder();
+
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->ordering($order)
+            ->build();
+
+        self::assertSame($order, $this->prop($orchestrator, 'order'));
+        self::assertSame($order, $this->prop($this->prop($orchestrator, 'finder'), 'order'));
+    }
+
+    public function testResettingOrderToNullRestoresLexicographic(): void
+    {
+        $orchestrator = (new MigrunBuilder())
+            ->directory($this->dir)
+            ->ordering(new \Dakujem\Migrun\NumericOrder())
+            ->ordering(null) // reset
+            ->build();
+
+        self::assertInstanceOf(
+            \Dakujem\Migrun\LexicographicOrder::class,
+            $this->prop($orchestrator, 'order'),
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // Finder configuration
     // -------------------------------------------------------------------------
 
@@ -557,6 +601,7 @@ final class MigrunBuilderTest extends TestCase
         self::assertSame($builder, $builder->directory($this->dir));
         self::assertSame($builder, $builder->container(null));
         self::assertSame($builder, $builder->reporter(null));
+        self::assertSame($builder, $builder->ordering(null));
         self::assertSame($builder, $builder->fileStorage(null));
         self::assertSame($builder, $builder->sqliteStorage(null));
         self::assertSame($builder, $builder->pdoStorage(null));

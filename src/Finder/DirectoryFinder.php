@@ -6,8 +6,10 @@ namespace Dakujem\Migrun\Finder;
 
 use Dakujem\Migrun\DiscoversMigrations;
 use Dakujem\Migrun\Exception\MigrationNotFoundException;
+use Dakujem\Migrun\LexicographicOrder;
 use Dakujem\Migrun\MigrationFile;
 use Dakujem\Migrun\MigrationHistoryEntry;
+use Dakujem\Migrun\OrdersMigrations;
 use FilesystemIterator;
 use Iterator;
 use RecursiveDirectoryIterator;
@@ -30,10 +32,13 @@ use SplFileInfo;
  * it includes the relative subdirectory path using the system directory
  * separator (e.g. "2024/01/20240101_120000_create_users").
  *
- * Results are sorted ascending by ID (lexicographic string comparison).
+ * Results are sorted ascending by ID using the injected OrdersMigrations
+ * comparison — by default LexicographicOrder, i.e. a byte-by-byte comparison.
  * With the recommended timestamp-prefixed naming, this naturally produces
- * chronological order. Any other stable, sortable naming scheme works equally
- * well — the finder does not parse or interpret the filename.
+ * chronological order. The finder never parses or interprets the filename.
+ *
+ * Note that byte-wise, '10' sorts BEFORE '9'. Zero-pad numeric IDs to a fixed
+ * width (001, 002, … 010) so that byte order matches numeric order.
  *
  * When $recursive is true, subdirectories are scanned as well. Sorting still
  * produces a single globally-ordered list across all subdirectories.
@@ -43,6 +48,7 @@ final readonly class DirectoryFinder implements DiscoversMigrations
     public function __construct(
         private string $directory,
         private bool $recursive = false,
+        private OrdersMigrations $order = new LexicographicOrder(),
     ) {
     }
 
@@ -53,7 +59,7 @@ final readonly class DirectoryFinder implements DiscoversMigrations
 
         usort(
             $migrations,
-            fn(MigrationFile $a, MigrationFile $b) => $a->id() <=> $b->id(),
+            fn(MigrationFile $a, MigrationFile $b) => $this->order->compare($a->id(), $b->id()),
         );
 
         return $migrations;

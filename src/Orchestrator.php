@@ -18,9 +18,13 @@ use Throwable;
  *     5. Record each successful execution in storage immediately.
  *
  *   rollback(int $steps):
- *     1. Ask storage for applied migrations (most-recent-first order).
+ *     1. Ask storage for applied migrations and order them most-recent-first here.
  *     2. Ask finder for all available migrations.
  *     3. For each of the last $steps applied migrations, execute Down and remove from storage.
+ *
+ * All ordering is decided here and in the finder, using the injected OrdersMigrations
+ * comparison — never by the storage backend. That way run order, rollback order and
+ * status order are guaranteed to agree, whichever storage is in use.
  *
  *   status():
  *     1. Collect all history entries from storage (keyed by ID).
@@ -38,6 +42,7 @@ final readonly class Orchestrator implements RunsMigrationsWithReporter
         private DiscoversMigrations $finder,
         private ExecutesMigrations $executor,
         private ReportsMigrations $reporter = new NullReporter(),
+        private OrdersMigrations $order = new LexicographicOrder(),
     ) {
     }
 
@@ -95,14 +100,8 @@ final readonly class Orchestrator implements RunsMigrationsWithReporter
     {
         $reporter ??= $this->reporter;
 
-        // Storage returns most-recent-first; collect only the first $steps entries.
-        $targets = [];
-        foreach ($this->storage->getApplied() as $entry) {
-            if (count($targets) >= $steps) {
-                break;
-            }
-            $targets[] = $entry;
-        }
+        // Order the history most-recent-first here, then take the first $steps entries.
+        $targets = array_slice($this->appliedDescending(), 0, max($steps, 0));
 
         // Resolve only the migrations we actually need, rather than listing everything
         $available = $this->finder->find($targets);
@@ -157,9 +156,11 @@ final readonly class Orchestrator implements RunsMigrationsWithReporter
             $files[$migration->id()] = $migration;
         }
 
-        // Merge all known IDs and sort ascending
-        $ids = array_keys($history + $files);
-        sort($ids);
+        // Merge all known IDs and sort ascending.
+        // array_keys() casts numeric-string IDs (e.g. "9") to int, so cast them back
+        // before comparing — MigrationStatusEntry::$id is a string.
+        $ids = array_map('strval', array_keys($history + $files));
+        usort($ids, fn(string $a, string $b) => $this->order->compare($a, $b));
 
         $entries = [];
         foreach ($ids as $id) {
@@ -177,6 +178,37 @@ final readonly class Orchestrator implements RunsMigrationsWithReporter
                 path: $onDisk ? $files[$id]->path() : null,
             );
         }
+
+        return $entries;
+    }
+
+    // -------------------------------------------------------------------------
+
+    /**
+     * The applied history, most-recently-applied first.
+     *
+     * Ordering is imposed here rather than taken from the storage: backends differ
+     * (SQL sorts by its own collation, the JSON file by insertion order), so relying
+     * on them would make rollback order depend on which storage is configured.
+     *
+     * Sorted by timestamp descending, then by ID descending. The ID is a genuine
+     * tiebreaker rather than a formality: timestamps are recorded with one-second
+     * precision, so a single run() typically stamps several migrations identically.
+     *
+     * @return MigrationHistoryEntry[]
+     */
+    private function appliedDescending(): array
+    {
+        $entries = [];
+        foreach ($this->storage->getApplied() as $entry) {
+            $entries[] = $entry;
+        }
+
+        usort(
+            $entries,
+            fn(MigrationHistoryEntry $a, MigrationHistoryEntry $b) => ($b->at() <=> $a->at())
+                ?: $this->order->compare($b->id(), $a->id()),
+        );
 
         return $entries;
     }

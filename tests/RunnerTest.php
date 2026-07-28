@@ -40,19 +40,31 @@ final class SpyStorage implements TracksMigrations
     }
 
     /**
-     * Returns MigrationHistoryEntry[] reconstructed from the stored IDs, most-recent-first.
+     * Returns MigrationHistoryEntry[] reconstructed from the stored IDs.
+     *
+     * Timestamps default to a fixed base plus one second per position, so that the
+     * n-th applied migration is stamped later than the (n-1)-th — as it would be in
+     * reality. Deterministic, unlike "now" for every entry.
+     *
+     * Deliberately returned most-recent-first (i.e. NOT in insertion order): the
+     * storage contract says order is not significant, and the orchestrator must
+     * impose its own regardless of what it receives.
      *
      * @return MigrationHistoryEntry[]
      */
     public function getApplied(): iterable
     {
-        return array_map(
-            fn(string $id) => new MigrationHistoryEntry(
+        $base = new \DateTimeImmutable('2024-01-01 00:00:00');
+
+        $entries = [];
+        foreach (array_values($this->applied) as $i => $id) {
+            $entries[] = new MigrationHistoryEntry(
                 id: $id,
-                at: $this->timestamps[$id] ?? new \DateTimeImmutable(),
-            ),
-            array_reverse($this->applied),
-        );
+                at: $this->timestamps[$id] ?? $base->modify("+{$i} seconds"),
+            );
+        }
+
+        return array_reverse($entries);
     }
 
     public function isApplied(string $id): bool
