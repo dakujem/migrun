@@ -1242,6 +1242,91 @@ the mutex, the decorator, and a distinct exit code so a caller can tell lock con
 apart from a failed migration.
 
 
+### Custom rollback order
+
+Rollbacks proceed in reverse **application** order — see
+[Rollback order follows application order](#rollback-order-follows-application-order). There is no
+setting to change that, and none is needed: `rollbackExactly()` reverts migrations in whatever order
+you hand it, so any ordering policy can be expressed as a decorator over the runner.
+
+This one reverts in reverse **ID** order instead — the order a `status` listing shows, and what Phinx
+calls `version_order: creation`:
+
+```php
+use Dakujem\Migrun\Exception\MigrationNotAppliedException;
+use Dakujem\Migrun\MigrationState;
+use Dakujem\Migrun\MigrationStatusEntry;
+use Dakujem\Migrun\ReportsMigrations;
+use Dakujem\Migrun\RunsMigrationsWithReporter;
+
+final readonly class IdOrderRollback implements RunsMigrationsWithReporter
+{
+    public function __construct(private RunsMigrationsWithReporter $inner) {}
+
+    public function rollback(int $steps = 1, ?ReportsMigrations $reporter = null): array
+    {
+        return $this->inner->rollbackExactly(
+            array_slice($this->appliedByIdDesc(), 0, max($steps, 0)),
+            $reporter,
+        );
+    }
+
+    public function rollbackBefore(string $id, ?ReportsMigrations $reporter = null): array
+    {
+        $applied = $this->appliedByIdDesc();
+        if (!in_array($id, $applied, true)) {
+            throw new MigrationNotAppliedException($id); // keep the contract of the wrapped runner
+        }
+
+        return $this->inner->rollbackExactly(
+            array_values(array_filter($applied, fn(string $a) => strcmp($a, $id) >= 0)),
+            $reporter,
+        );
+    }
+
+    public function rollbackAll(?ReportsMigrations $reporter = null): array
+    {
+        return $this->inner->rollbackExactly($this->appliedByIdDesc(), $reporter);
+    }
+
+    /** @return string[] Applied migration IDs, highest first. */
+    private function appliedByIdDesc(): array
+    {
+        $ids = array_values(array_map(
+            fn(MigrationStatusEntry $e) => $e->id,
+            array_filter(
+                $this->inner->status(),
+                fn(MigrationStatusEntry $e) => $e->state === MigrationState::Applied,
+            ),
+        ));
+        usort($ids, fn(string $a, string $b) => strcmp($b, $a));
+
+        return $ids;
+    }
+
+    // Everything else passes through unchanged.
+    public function run(?ReportsMigrations $r = null): array { return $this->inner->run($r); }
+    public function runTo(string $id, ?ReportsMigrations $r = null): array { return $this->inner->runTo($id, $r); }
+    public function rollbackExactly(array $orderedIds, ?ReportsMigrations $r = null): array { return $this->inner->rollbackExactly($orderedIds, $r); }
+    public function status(): array { return $this->inner->status(); }
+}
+```
+
+Three things to know before reaching for it:
+
+- **`rollback($steps)` changes meaning.** "The last one" becomes the highest-ID applied migration
+  rather than the one applied most recently. After a branch merge that is somebody else's migration.
+- **It can fail where application order would not.** Reverting a higher ID first leaves a
+  later-applied, lower-ID migration in place — and that migration's `up()` ran *with* the higher one
+  present, so it may depend on it.
+- **Put the lock outermost.** `new LockingOrchestrator(new IdOrderRollback($orchestrator), $mutex)`,
+  not the other way round. The decorator reads `status()` before reverting, and only this nesting
+  keeps that read and the reversal inside one lock.
+
+A decorator must implement every method of the interface. That is not a trap — omitting one is a
+fatal error when the class loads, never a silent pass-through.
+
+
 ### Seeders
 
 Because an `Orchestrator` is just a directory + storage + invoker, you can run a second one for database seeders with no extra infrastructure:
