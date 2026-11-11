@@ -20,6 +20,7 @@ jobs:
           - php: '8.4'
           - php: '8.5'
             #allow_failure: true
+          - php: '8.6'
 
     name: "PHP${{ matrix.php }} ${{ matrix.composer-flags }}"
     steps:
